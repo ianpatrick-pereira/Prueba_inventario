@@ -463,3 +463,12 @@ def test_nombre_con_script_se_muestra_escapado(adm, admin_user):
 def test_busqueda_con_html_se_escapa(adm):
     t = html(adm.get(reverse("producto_lista"), {"q": '"><script>x</script>'}))
     assert "<script>x</script>" not in t
+
+
+@pytest.mark.parametrize("campo", ["costo", "stock_min", "stock_max"])
+def test_formulario_de_producto_rechaza_negativos(adm, prod, campo):
+    for url in (reverse("producto_nuevo"), reverse("producto_editar", args=[prod.pk])):
+        r = adm.post(url, datos_producto(sku="NEG1", **{campo: "-1"}))
+        assert r.status_code == 200 and campo in r.context["form"].errors
+        assert "No puede ser negativo." in html(r)
+    assert not Producto.objects.filter(sku="NEG1").exists()

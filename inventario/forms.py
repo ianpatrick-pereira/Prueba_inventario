@@ -49,6 +49,21 @@ class ProveedorForm(_NombreUnicoMixin, forms.ModelForm):
 
 
 class _ProductoBaseForm(forms.ModelForm):
+    def _no_negativo(self, campo):
+        valor = self.cleaned_data.get(campo)
+        if valor is not None and valor < 0:
+            raise forms.ValidationError("No puede ser negativo.")
+        return valor
+
+    def clean_costo(self):
+        return self._no_negativo("costo")
+
+    def clean_stock_min(self):
+        return self._no_negativo("stock_min")
+
+    def clean_stock_max(self):
+        return self._no_negativo("stock_max")
+
     def clean(self):
         datos = super().clean()
         minimo, maximo = datos.get("stock_min"), datos.get("stock_max")
