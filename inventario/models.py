@@ -332,8 +332,17 @@ class Movimiento(models.Model):
         if self.tipo == self.AJUSTE and not (self.motivo or "").strip():
             raise ValidationError({"motivo": "Un ajuste necesita un motivo."})
         # D-33: sin fechas futuras (5 minutos de tolerancia por desfase de reloj).
-        if self.fecha is not None and self.fecha > timezone.now() + TOLERANCIA_FECHA_FUTURA:
-            raise ValidationError({"fecha": "La fecha del movimiento no puede ser futura."})
+        if self.fecha is not None:
+            try:
+                fecha = self._meta.get_field("fecha").to_python(self.fecha)
+            except ValidationError:
+                raise ValidationError({"fecha": "Fecha no válida."})
+            # Sin zona horaria no se adivina: el importador debe convertir explicitamente.
+            if fecha is None or timezone.is_naive(fecha):
+                raise ValidationError({"fecha": "La fecha debe incluir zona horaria."})
+            self.fecha = fecha
+            if fecha > timezone.now() + TOLERANCIA_FECHA_FUTURA:
+                raise ValidationError({"fecha": "La fecha del movimiento no puede ser futura."})
         if self.revierte_id is not None:
             self._validar_reversa()
 
@@ -349,6 +358,8 @@ class Movimiento(models.Model):
             raise ValidationError({"tipo": "Solo un ajuste puede revertir otro movimiento."})
         if original.revierte_id is not None:
             raise ValidationError({"revierte": "No se puede revertir una reversa."})
+        if original.documento_id != self.documento_id:
+            raise ValidationError({"documento": "La reversa debe tener el mismo documento."})
         if original.producto_id != self.producto_id:
             raise ValidationError({"revierte": "La reversa debe ser del mismo producto."})
         if self.cantidad is None or Decimal(str(self.cantidad)) != -original.cantidad:

@@ -1,5 +1,6 @@
 """Pruebas del servicio de stock (T-F1-04; decisiones D-17, D-31, D-32)."""
 from datetime import datetime, time, timedelta
+from datetime import timezone as dt_tz
 from decimal import Decimal
 
 import pytest
@@ -393,8 +394,9 @@ def test_sqlite_configurada_con_transacciones_immediate():
 
 
 @pytest.mark.django_db(transaction=True)
-def test_dos_salidas_simultaneas_una_pasa_y_la_otra_es_stock_insuficiente():
+def test_dos_salidas_simultaneas_una_pasa_y_la_otra_es_stock_insuficiente(monkeypatch):
     import threading
+    import time
 
     from django.db import connection
 
@@ -403,6 +405,14 @@ def test_dos_salidas_simultaneas_una_pasa_y_la_otra_es_stock_insuficiente():
     servicios.registrar_entrada(p, 10, u)
     barrera = threading.Barrier(2)
     resultados = []
+    stock_real = servicios.stock_de
+
+    def stock_lento(*a, **k):
+        valor = stock_real(*a, **k)
+        time.sleep(0.4)  # espera DENTRO de la seccion critica, justo despues de leer el stock
+        return valor
+
+    monkeypatch.setattr(servicios, "stock_de", stock_lento)
 
     def salida():
         try:
@@ -422,6 +432,7 @@ def test_dos_salidas_simultaneas_una_pasa_y_la_otra_es_stock_insuficiente():
     for h in hilos:
         h.join(timeout=60)
     assert sorted(resultados) == ["insuficiente", "ok"], resultados
+    monkeypatch.undo()
     assert servicios.stock_de(p) == D("0.00")
 
 
@@ -643,3 +654,66 @@ def test_stock_insuficiente_no_tiene_error_dict_pero_si_messages(producto, usuar
         servicios.registrar_salida(producto, 1, usuario)
     assert not hasattr(e.value, "error_dict")
     assert "Stock insuficiente" in e.value.messages[0]
+
+
+# R1. fecha sin zona horaria o en texto (complemento de D-33)
+def test_fecha_sin_zona_rechazada_por_el_servicio_y_por_create(producto, usuario):
+    ingenua = datetime(2026, 1, 1, 12, 0)
+    with pytest.raises(ValidationError) as e:
+        servicios.registrar_entrada(producto, 1, usuario, fecha=ingenua)
+    assert "fecha" in e.value.error_dict
+    with pytest.raises(ValidationError) as e:
+        Movimiento.objects.create(producto=producto, usuario=usuario, tipo="entrada",
+                                  cantidad=D("1"), fecha=ingenua)
+    assert "fecha" in e.value.error_dict
+    with pytest.raises(ValidationError):
+        Movimiento.objects.create(producto=producto, usuario=usuario, tipo="entrada",
+                                  cantidad=D("1"), fecha="2026-01-01T12:00:00")
+    with pytest.raises(ValidationError):
+        Movimiento.objects.create(producto=producto, usuario=usuario, tipo="entrada",
+                                  cantidad=D("1"), fecha="no es una fecha")
+    assert Movimiento.objects.count() == 0
+
+
+def test_fecha_en_texto_con_zona_se_acepta(producto, usuario):
+    m = Movimiento.objects.create(producto=producto, usuario=usuario, tipo="entrada",
+                                  cantidad=D("1"), fecha="2026-01-01T12:00:00Z")
+    m.refresh_from_db()
+    assert m.fecha == datetime(2026, 1, 1, 12, 0, tzinfo=dt_tz.utc)
+
+
+@pytest.mark.parametrize("fecha,aceptada", [("2026-01-01T12:00:00", False), ("2026-01-01T12:00:00Z", True)])
+def test_carga_cruda_con_y_sin_zona(producto, usuario, fecha, aceptada):
+    from django.core import serializers
+
+    m = Movimiento(pk=900, producto=producto, usuario=usuario, tipo="entrada", cantidad=D("2"),
+                   fecha=datetime(2026, 1, 1, 12, 0, tzinfo=dt_tz.utc))
+    datos = serializers.serialize("json", [m]).replace("2026-01-01T12:00:00Z", fecha)
+    assert fecha in datos
+    if aceptada:
+        for obj in serializers.deserialize("json", datos):
+            obj.save()
+        assert Movimiento.objects.get(pk=900).cantidad == D("2.00")
+    else:
+        with pytest.raises(ValidationError) as e:
+            for obj in serializers.deserialize("json", datos):
+                obj.save()
+        assert "fecha" in e.value.error_dict
+        assert Movimiento.objects.count() == 0
+
+
+# O1. la reversa debe tener el mismo documento que el original
+def test_reversa_con_documento_distinto_rechazada(producto, usuario):
+    from inventario.models import Documento
+
+    d1 = Documento.objects.create(tipo="venta", numero="D-1")
+    d2 = Documento.objects.create(tipo="venta", numero="D-2")
+    original = servicios.registrar_entrada(producto, 5, usuario, documento=d1)
+    for doc in (d2, None):
+        with pytest.raises(ValidationError) as e:
+            Movimiento.objects.create(producto=producto, usuario=usuario, tipo="ajuste",
+                                      cantidad=D("-5"), motivo="x", revierte=original, documento=doc)
+        assert "documento" in e.value.error_dict
+    ok = Movimiento.objects.create(producto=producto, usuario=usuario, tipo="ajuste",
+                                   cantidad=D("-5"), motivo="x", revierte=original, documento=d1)
+    assert ok.revierte == original
