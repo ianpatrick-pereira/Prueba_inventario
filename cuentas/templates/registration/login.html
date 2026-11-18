@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block titulo %}Ingresar - Sistema de inventario{% endblock %}
+{% block contenido %}
+  <h1>Ingresar</h1>
+  <form method="post">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+      <p class="error" role="alert">{{ form.non_field_errors.0 }}</p>
+    {% endif %}
+    <label for="{{ form.username.id_for_label }}">Usuario</label>
+    {{ form.username }}
+    <label for="{{ form.password.id_for_label }}">Contraseña</label>
+    {{ form.password }}
+    <input type="hidden" name="next" value="{{ next }}">
+    <p><button type="submit">Ingresar</button></p>
+  </form>
+{% endblock %}

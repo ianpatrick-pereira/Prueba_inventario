@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -19,7 +20,10 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture
 def usuario():
-    return get_user_model().objects.create_user("operador", password="x-prueba-123")
+    """Usuario del grupo Administrador (puede todas las operaciones de stock, D-38/D-39)."""
+    u = get_user_model().objects.create_user("operador", password="x-prueba-123")
+    u.groups.add(Group.objects.get(name="Administrador"))
+    return u
 
 
 @pytest.fixture
@@ -401,6 +405,7 @@ def test_dos_salidas_simultaneas_una_pasa_y_la_otra_es_stock_insuficiente(monkey
     from django.db import connection
 
     u = get_user_model().objects.create_user("hilos", password="x-prueba-123")
+    u.groups.add(Group.objects.get(name="Administrador"))
     p = Producto.objects.create(sku="H-1", nombre="hilos")
     servicios.registrar_entrada(p, 10, u)
     barrera = threading.Barrier(2)

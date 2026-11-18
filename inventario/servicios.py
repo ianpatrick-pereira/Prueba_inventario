@@ -26,13 +26,15 @@ Excepciones:
   que NO tiene error_dict; para leer el texto usa .messages.
 - ValidationError: cantidad invalida (float, bool, <= 0, decimales de mas...), motivo
   faltante, fecha futura, reversa no permitida.
+- PermissionDenied (de Django): el usuario no tiene el permiso de la operacion, esta
+  inactivo o es anonimo (D-39). Se comprueba ANTES de validar o tocar nada.
 - MovimientoInmutable: solo si alguien intenta modificar/borrar un movimiento.
 """
 import re
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import models, transaction
 from django.db.models import OuterRef, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
@@ -56,6 +58,18 @@ class StockInsuficiente(ValidationError):
             f"Stock insuficiente de {producto}: hay {stock_actual} y se pide {cantidad_pedida}.",
             code="stock_insuficiente",
         )
+
+
+def _exigir_permiso(usuario, permiso):
+    """D-39: defensa en profundidad. Ninguna pantalla o importador futuro puede saltarse
+    los permisos. `permiso` es el codename de Movimiento (p. ej. "registrar_entrada")."""
+    if (
+        usuario is None
+        or not getattr(usuario, "is_authenticated", False)
+        or not getattr(usuario, "is_active", False)
+        or not usuario.has_perm(f"inventario.{permiso}")
+    ):
+        raise PermissionDenied(f"No tienes permiso para esta operación ({permiso}).")
 
 
 _NUMERO = re.compile(r"[+-]?\d+(\.\d+)?", re.ASCII)
@@ -169,6 +183,7 @@ def _positiva(cantidad):
 
 def registrar_entrada(producto, cantidad, usuario, documento=None, costo_unitario=None,
                       fecha=None, motivo=""):
+    _exigir_permiso(usuario, "registrar_entrada")
     cantidad = _positiva(cantidad)
     if costo_unitario is not None:
         costo_unitario = _a_decimal(costo_unitario, "costo_unitario")
@@ -181,6 +196,7 @@ def registrar_entrada(producto, cantidad, usuario, documento=None, costo_unitari
 def registrar_salida(producto, cantidad, usuario, documento=None, fecha=None, motivo="",
                      permitir_negativo=False):
     """`cantidad` es positiva; se guarda negativa."""
+    _exigir_permiso(usuario, "registrar_salida")
     cantidad = _positiva(cantidad)
     with transaction.atomic():
         producto = _bloquear(producto)
@@ -190,6 +206,7 @@ def registrar_salida(producto, cantidad, usuario, documento=None, fecha=None, mo
 
 def registrar_ajuste(producto, cantidad_con_signo, usuario, motivo, documento=None,
                      fecha=None, permitir_negativo=False):
+    _exigir_permiso(usuario, "registrar_ajuste")
     cantidad = _a_decimal(cantidad_con_signo, "cantidad")
     with transaction.atomic():
         producto = _bloquear(producto)
@@ -199,6 +216,7 @@ def registrar_ajuste(producto, cantidad_con_signo, usuario, motivo, documento=No
 
 def ajustar_a_conteo(producto, cantidad_contada, usuario, motivo, documento=None):
     """Ajusta el stock a lo contado. Devuelve el ajuste, o None si no hay diferencia."""
+    _exigir_permiso(usuario, "registrar_ajuste")
     contada = _a_decimal(cantidad_contada, "cantidad_contada")
     if contada < 0:
         raise ValidationError({"cantidad_contada": "Lo contado no puede ser negativo."})
@@ -213,6 +231,7 @@ def ajustar_a_conteo(producto, cantidad_contada, usuario, motivo, documento=None
 
 def revertir(movimiento, usuario, motivo, permitir_negativo=False):
     """Corrige un movimiento con un ajuste de cantidad opuesta (D-32)."""
+    _exigir_permiso(usuario, "revertir_movimiento")
     with transaction.atomic():
         producto = _bloquear(movimiento.producto)
         # Se relee: el objeto recibido puede estar desactualizado.
