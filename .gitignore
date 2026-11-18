@@ -1,0 +1,36 @@
+# Secretos: la clave de la API de IA nunca se sube
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Django: base de datos local, archivos subidos y estáticos generados
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+
+# Datos reales del negocio (fotos de facturas, exportaciones de Eleventa)
+datos_reales/
+*.xlsx
+*.xls
+*.csv
+
+# Respaldos
+backups/
+*.bak
+
+# Sistema operativo y editores
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
