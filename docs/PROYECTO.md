@@ -12,10 +12,11 @@ Referencias para retomar el trabajo en cualquier conversación.
 - La IA programa; el responsable decide, prueba y aprende (≥ 4 h/semana).
 - Factura en papel (nombre, código, precio, cantidad) → foto leída con IA → vista previa → confirmar.
 - El sistema "aprende" guardando cada asociación código-proveedor → producto confirmada.
-- Salidas: los servicios se cobran en Eleventa, que descuenta stock al cobrar (D-13).
-  Este sistema se sincroniza por archivos: envía cada ingreso a Eleventa (RF-24),
-  importa las ventas de Eleventa (RF-13) y compara existencias (RF-25).
-  Pendiente verificar en Eleventa: importar inventario desde Excel y exportar ventas.
+- RUMBO (D-20): este sistema es el INVENTARIO OFICIAL; Eleventa queda solo como CAJA.
+  Los ingresos se registran solo aquí. De Eleventa solo se leen los tickets cobrados (RF-13).
+  Eleventa descuenta su stock solo al cobrar; si bloquea con stock 0: activar venta sin
+  existencia o cargar una sola vez un stock alto (RF-24). No es una copia de Eleventa.
+- VISIÓN (D-23): un Eleventa propio pero mejor (inventario, ventas y caja), por etapas: primero inventario (fases 1-4), luego ventas y caja. D-20 es transitoria. Orden confirmado: primero inventario.
 - sku = código del producto en Eleventa (llave de sincronización).
 - Eleventa trabaja con tickets por vehículo; al cobrar descuenta stock; tickets cobrados se buscan
   por fecha y se pueden renombrar (ej. patente). Cientos de tickets. Las salidas se importan por
@@ -24,10 +25,7 @@ Referencias para retomar el trabajo en cualquier conversación.
   importan cobrados); hay devoluciones parciales y cancelaciones totales (movimientos inversos);
   nombre del ticket = "marca modelo patente", la patente es el identificador (D-15).
 - Tickets por día: varía según clientes (cientos en total); importación diaria sirve igual.
-- Eleventa NO importa productos ni inventario. Decisión pendiente para los ingresos:
-  A) lista lista para cargar, B) automatización de teclado, C) stock solo en este sistema
-  (Eleventa sin control de inventario). Recomendado: C si Eleventa permite desactivar inventario;
-  si no, A en v1 y probar B. Verificar en la ficha de producto de Eleventa.
+- Eleventa NO importa productos ni inventario -> resuelto con D-20 (opción C).
 - Modelo de datos APROBADO (D-17): tablas Categoría, Producto, Código alternativo (barras/fabricante),
   Producto–Proveedor (un producto, varios proveedores, código por proveedor), Movimiento,
   Documento (factura/ticket/conteo, con foto de factura y patente), Proveedor, Pedido (fase 3).
@@ -59,3 +57,5 @@ El usuario no edita la documentación a mano. Cada cambio que pide al proyecto e
 - Código → Guía personal de programación
 
 Toda modificación suma una fila en Bitácora; los cambios relevantes suben la versión en Inicio → Control de cambios.
+
+- ESTADO (18-11-2026): fase 0 cerrada (D-26). Fase 1 en curso; el programador trabaja en la nube y T-F1-01 se hace antes de T-F1-08 (D-27).
