@@ -267,6 +267,12 @@ class Movimiento(models.Model):
     cantidad = _cantidad(verbose_name="cantidad (con signo)")
     costo_unitario = _monto(verbose_name="costo unitario", null=True, blank=True)
     motivo = models.TextField("motivo", blank=True, default="")
+    # D-32: una reversa es un ajuste de cantidad opuesta que apunta al movimiento que
+    # corrige. OneToOne => la base garantiza que un movimiento se revierta una sola vez.
+    revierte = models.OneToOneField(
+        "self", verbose_name="revierte a", on_delete=models.PROTECT,
+        null=True, blank=True, related_name="reversa",
+    )
 
     objects = MovimientoQuerySet.as_manager()
 
