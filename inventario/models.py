@@ -6,6 +6,7 @@ Reglas clave:
   en Eleventa existen códigos como «0077» que un número destruiría.
 - Los movimientos son inmutables: un error se corrige con un movimiento inverso.
 """
+from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
@@ -211,6 +212,8 @@ class MovimientoInmutable(PermissionDenied):
     """Se intentó modificar o borrar un movimiento ya guardado."""
 
 
+TOLERANCIA_FECHA_FUTURA = timedelta(minutes=5)
+
 MENSAJE_INMUTABLE = (
     "Los movimientos son inmutables: no se pueden modificar ni borrar. "
     "Para corregir un error, registra un movimiento inverso."
@@ -267,6 +270,12 @@ class Movimiento(models.Model):
     cantidad = _cantidad(verbose_name="cantidad (con signo)")
     costo_unitario = _monto(verbose_name="costo unitario", null=True, blank=True)
     motivo = models.TextField("motivo", blank=True, default="")
+    # D-32: una reversa es un ajuste de cantidad opuesta que apunta al movimiento que
+    # corrige. OneToOne => la base garantiza que un movimiento se revierta una sola vez.
+    revierte = models.OneToOneField(
+        "self", verbose_name="revierte a", on_delete=models.PROTECT,
+        null=True, blank=True, related_name="reversa",
+    )
 
     objects = MovimientoQuerySet.as_manager()
 
@@ -288,6 +297,11 @@ class Movimiento(models.Model):
                 violation_error_message="La cantidad está fuera del rango permitido.",
             ),
             models.CheckConstraint(
+                condition=Q(revierte__isnull=True) | Q(tipo="ajuste"),
+                name="movimiento_revierte_solo_ajuste",
+                violation_error_message="Solo un ajuste puede revertir otro movimiento.",
+            ),
+            models.CheckConstraint(
                 condition=~Q(tipo="entrada") | Q(cantidad__gt=0),
                 name="movimiento_entrada_positiva",
                 violation_error_message="Una entrada debe tener cantidad mayor que cero.",
@@ -307,9 +321,8 @@ class Movimiento(models.Model):
 
     def clean(self):
         super().clean()
-        # La base de datos solo ve motivo == ""; aquí también se rechaza el motivo de solo espacios.
-        if self.tipo == self.AJUSTE and not (self.motivo or "").strip():
-            raise ValidationError({"motivo": "Un ajuste necesita un motivo."})
+        # Mismas reglas que save/bulk_create/carga cruda (motivo sin espacios, fecha, reversa...).
+        self.validar_datos()
 
     def validar_datos(self):
         """Valida decimales y motivo. Corre en save(), bulk_create y en el receptor
@@ -318,6 +331,39 @@ class Movimiento(models.Model):
         self._validar_decimales()
         if self.tipo == self.AJUSTE and not (self.motivo or "").strip():
             raise ValidationError({"motivo": "Un ajuste necesita un motivo."})
+        # D-33: sin fechas futuras (5 minutos de tolerancia por desfase de reloj).
+        if self.fecha is not None:
+            try:
+                fecha = self._meta.get_field("fecha").to_python(self.fecha)
+            except ValidationError:
+                raise ValidationError({"fecha": "Fecha no válida."})
+            # Sin zona horaria no se adivina: el importador debe convertir explicitamente.
+            if fecha is None or timezone.is_naive(fecha):
+                raise ValidationError({"fecha": "La fecha debe incluir zona horaria."})
+            self.fecha = fecha
+            if fecha > timezone.now() + TOLERANCIA_FECHA_FUTURA:
+                raise ValidationError({"fecha": "La fecha del movimiento no puede ser futura."})
+        if self.revierte_id is not None:
+            self._validar_reversa()
+
+    def _validar_reversa(self):
+        """D-32: una reversa es un ajuste de cantidad opuesta, del mismo producto,
+        sobre un movimiento que no es a su vez una reversa."""
+        if self.pk is not None and self.revierte_id == self.pk:
+            raise ValidationError({"revierte": "Un movimiento no puede revertirse a sí mismo."})
+        original = Movimiento.objects.filter(pk=self.revierte_id).first()
+        if original is None:
+            raise ValidationError({"revierte": "El movimiento a revertir no existe."})
+        if self.tipo != self.AJUSTE:
+            raise ValidationError({"tipo": "Solo un ajuste puede revertir otro movimiento."})
+        if original.revierte_id is not None:
+            raise ValidationError({"revierte": "No se puede revertir una reversa."})
+        if original.documento_id != self.documento_id:
+            raise ValidationError({"documento": "La reversa debe tener el mismo documento."})
+        if original.producto_id != self.producto_id:
+            raise ValidationError({"revierte": "La reversa debe ser del mismo producto."})
+        if self.cantidad is None or Decimal(str(self.cantidad)) != -original.cantidad:
+            raise ValidationError({"cantidad": "La reversa debe tener la cantidad opuesta."})
 
     def _validar_decimales(self):
         """Rechaza (sin redondear) valores con mas decimales o digitos que el campo."""
