@@ -135,9 +135,10 @@ def test_movimientos_validos_se_guardan(producto, usuario):
 
 
 def test_ajuste_sin_motivo_rechazado_por_la_base_de_datos(producto, usuario):
-    # bulk_create esquiva save() y full_clean(): solo la restriccion de la base puede frenarlo.
-    with pytest.raises(IntegrityError), transaction.atomic():
-        Movimiento.objects.bulk_create([mov(producto, usuario, "ajuste", "3", "")])
+    # INSERT directo en SQL: esquiva el ORM y toda validacion de Python.
+    with pytest.raises(IntegrityError) as e, transaction.atomic():
+        _insert_sql(producto, usuario, "3", "ajuste", "")
+    _constraint(e, "movimiento_ajuste_con_motivo")
     assert Movimiento.objects.count() == 0
 
 
@@ -262,7 +263,7 @@ def test_save_con_pk_existente_falla_y_no_cambia_la_fila(producto, usuario):
     original.save()
     nuevo = mov(producto, usuario, "entrada", "99")
     nuevo.pk = original.pk
-    with pytest.raises(IntegrityError), transaction.atomic():
+    with pytest.raises((IntegrityError, MovimientoInmutable)), transaction.atomic():
         nuevo.save()
     assert Movimiento.objects.get(pk=original.pk).cantidad == Decimal("5.00")
     assert Movimiento.objects.count() == 1
@@ -314,13 +315,97 @@ def test_cantidad_valida_se_acepta_sin_redondear(producto, usuario):
     mov(producto, usuario, "entrada", "9999999999.99").save()
 
 
-def test_cantidad_fuera_de_rango_rechazada_por_la_base(producto, usuario):
+def _insert_sql(producto, usuario, cantidad, tipo="entrada", motivo=""):
+    """INSERT directo en SQL: esquiva el ORM, save(), bulk_create y las senales."""
+    from django.db import connection
+
+    with connection.cursor() as c:
+        c.execute(
+            "INSERT INTO inventario_movimiento"
+            " (producto_id, usuario_id, fecha, tipo, cantidad, motivo)"
+            " VALUES (%s, %s, '2026-01-01 00:00:00', %s, %s, %s)",
+            [producto.pk, usuario.pk, tipo, cantidad, motivo],
+        )
+
+
+@pytest.mark.parametrize(
+    "cantidad,tipo",
+    [("9999999999.999", "entrada"), ("99999999999999.99", "entrada"), ("-10000000000", "salida")],
+)
+def test_cantidad_fuera_de_rango_rechazada_por_la_base(producto, usuario, cantidad, tipo):
     with pytest.raises(IntegrityError) as e, transaction.atomic():
-        Movimiento.objects.bulk_create([mov(producto, usuario, "entrada", "99999999999999.99")])
+        _insert_sql(producto, usuario, cantidad, tipo)
     _constraint(e, "movimiento_cantidad_en_rango")
-    with pytest.raises(IntegrityError) as e, transaction.atomic():
-        Movimiento.objects.bulk_create([mov(producto, usuario, "salida", "-10000000000")])
-    _constraint(e, "movimiento_cantidad_en_rango")
+
+
+def test_cantidad_maxima_representable_aceptada_y_legible(producto, usuario):
+    Movimiento.objects.bulk_create([mov(producto, usuario, "entrada", "9999999999.99")])
+    Movimiento.objects.bulk_create([mov(producto, usuario, "salida", "-9999999999.99")])
+    assert sorted(Movimiento.objects.values_list("cantidad", flat=True)) == [
+        Decimal("-9999999999.99"), Decimal("9999999999.99"),
+    ]
+
+
+def test_cantidad_9999999999_999_rechazada_en_bulk_create(producto, usuario):
+    with pytest.raises(ValidationError) as e:
+        Movimiento.objects.bulk_create([mov(producto, usuario, "entrada", "9999999999.999")])
+    assert "cantidad" in e.value.error_dict
+    assert Movimiento.objects.count() == 0
+
+
+# N1. bulk_create y carga cruda validan igual que save()
+@pytest.mark.parametrize(
+    "tipo,cantidad,motivo,campo",
+    [("entrada", "0.001", "", "cantidad"), ("ajuste", "3", "\t", "motivo")],
+)
+def test_bulk_create_valida_decimales_y_motivo(producto, usuario, tipo, cantidad, motivo, campo):
+    with pytest.raises(ValidationError) as e:
+        Movimiento.objects.bulk_create(
+            [mov(producto, usuario, "entrada", "1"), mov(producto, usuario, tipo, cantidad, motivo)]
+        )
+    assert campo in e.value.error_dict
+    assert Movimiento.objects.count() == 0
+
+
+@pytest.mark.parametrize(
+    "tipo,cantidad,motivo,campo",
+    [("entrada", "0.001", "", "cantidad"), ("ajuste", "3", "\t", "motivo")],
+)
+def test_carga_cruda_valida_decimales_y_motivo(producto, usuario, tipo, cantidad, motivo, campo):
+    m = mov(producto, usuario, tipo, "3", motivo or "x")
+    m.pk = 500
+    datos = serializers.serialize("json", [m])
+    datos = datos.replace('"cantidad": "3"', f'"cantidad": "{cantidad}"').replace(
+        '"motivo": "x"', f'"motivo": "{motivo}"'
+    )
+    datos = datos.replace("\t", "\\t") if motivo == "\t" else datos
+    with pytest.raises(ValidationError) as e:
+        for obj in serializers.deserialize("json", datos):
+            obj.save()
+    assert campo in e.value.error_dict
+    assert Movimiento.objects.count() == 0
+
+
+# N4. save_base() directo sobre un pk existente
+def test_save_base_sobre_pk_existente_rechazado(producto, usuario):
+    m = mov(producto, usuario, "entrada", "5")
+    m.save()
+    m.cantidad = Decimal("99")
+    with pytest.raises(MovimientoInmutable):
+        m.save_base()
+    with pytest.raises(MovimientoInmutable):
+        m.save_base(raw=True)
+    assert Movimiento.objects.get(pk=m.pk).cantidad == Decimal("5.00")
+
+
+# N5. valores enormes o no finitos
+@pytest.mark.parametrize("valor", [Decimal("1e30"), Decimal("-1e30"), Decimal("1e-30"), Decimal("NaN"), Decimal("Infinity")])
+def test_cantidad_enorme_o_no_finita_da_validation_error(producto, usuario, valor):
+    m = mov(producto, usuario, "entrada", "1")
+    m.cantidad = valor
+    with pytest.raises(ValidationError) as e:
+        m.save()
+    assert "cantidad" in e.value.error_dict
 
 
 # 5. bulk_create sin upsert ni ignorar conflictos
@@ -397,7 +482,7 @@ def test_factura_sin_proveedor_rechazada_por_validacion():
 # 11. motivo vacio tras Trim
 def test_ajuste_con_motivo_de_espacios_rechazado_por_la_base(producto, usuario):
     with pytest.raises(IntegrityError) as e, transaction.atomic():
-        Movimiento.objects.bulk_create([mov(producto, usuario, "ajuste", "3", "   ")])
+        _insert_sql(producto, usuario, "3", "ajuste", "   ")
     _constraint(e, "movimiento_ajuste_con_motivo")
 
 

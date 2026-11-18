@@ -24,8 +24,12 @@ CANTIDAD_MAX_DIGITS = 12
 CANTIDAD_DECIMAL_PLACES = 2
 MONTO_MAX_DIGITS = 14
 MONTO_DECIMAL_PLACES = 2
-# La cantidad debe ser estrictamente menor (en valor absoluto) que este limite.
-CANTIDAD_LIMITE = Decimal(10) ** (CANTIDAD_MAX_DIGITS - CANTIDAD_DECIMAL_PLACES)
+# Maximo representable de la cantidad en valor absoluto (9999999999.99 con 12/2).
+# El rango del CHECK es inclusivo: un valor mayor (p. ej. 9999999999.999) se
+# redondearia al leerlo y romperia la consulta.
+CANTIDAD_MAXIMO = Decimal(10) ** (CANTIDAD_MAX_DIGITS - CANTIDAD_DECIMAL_PLACES) - Decimal(
+    1
+).scaleb(-CANTIDAD_DECIMAL_PLACES)
 
 
 def _cantidad(**kw):
@@ -234,6 +238,9 @@ class MovimientoQuerySet(models.QuerySet):
         # actualizarian o descartarian movimientos existentes en silencio.
         if update_conflicts or ignore_conflicts:
             raise MovimientoInmutable(MENSAJE_INMUTABLE)
+        objs = list(objs)
+        for obj in objs:
+            obj.validar_datos()
         return super().bulk_create(
             objs, batch_size=batch_size, update_fields=update_fields, unique_fields=unique_fields,
         )
@@ -276,7 +283,7 @@ class Movimiento(models.Model):
                 violation_error_message="Tipo de movimiento no válido.",
             ),
             models.CheckConstraint(
-                condition=Q(cantidad__gt=-CANTIDAD_LIMITE) & Q(cantidad__lt=CANTIDAD_LIMITE),
+                condition=Q(cantidad__gte=-CANTIDAD_MAXIMO) & Q(cantidad__lte=CANTIDAD_MAXIMO),
                 name="movimiento_cantidad_en_rango",
                 violation_error_message="La cantidad está fuera del rango permitido.",
             ),
@@ -304,6 +311,14 @@ class Movimiento(models.Model):
         if self.tipo == self.AJUSTE and not (self.motivo or "").strip():
             raise ValidationError({"motivo": "Un ajuste necesita un motivo."})
 
+    def validar_datos(self):
+        """Valida decimales y motivo. Corre en save(), bulk_create y en el receptor
+        pre_save (que tambien cubre loaddata y save_base), para que ninguna via
+        guarde datos que luego no cuadren al sumar."""
+        self._validar_decimales()
+        if self.tipo == self.AJUSTE and not (self.motivo or "").strip():
+            raise ValidationError({"motivo": "Un ajuste necesita un motivo."})
+
     def _validar_decimales(self):
         """Rechaza (sin redondear) valores con mas decimales o digitos que el campo."""
         errores = {}
@@ -321,25 +336,22 @@ class Movimiento(models.Model):
                 errores[nombre] = "Valor numérico no válido."
                 continue
             paso = Decimal(1).scaleb(-campo.decimal_places)
-            if dec != dec.quantize(paso):
-                errores[nombre] = (
-                    f"Admite como máximo {campo.decimal_places} decimales."
-                )
-                continue
-            if abs(dec) >= Decimal(10) ** (campo.max_digits - campo.decimal_places):
+            maximo = Decimal(10) ** (campo.max_digits - campo.decimal_places) - paso
+            # El rango se comprueba antes de quantize(): un valor enorme lo haria fallar.
+            if abs(dec) > maximo:
                 errores[nombre] = (
                     f"Admite como máximo {campo.max_digits} dígitos en total "
                     f"({campo.decimal_places} decimales)."
                 )
+            elif dec != dec.quantize(paso):
+                errores[nombre] = f"Admite como máximo {campo.decimal_places} decimales."
         if errores:
             raise ValidationError(errores)
 
     def save(self, *args, **kwargs):
         if args or not self._state.adding or kwargs.get("force_update") or kwargs.get("update_fields"):
             raise MovimientoInmutable(MENSAJE_INMUTABLE)
-        self._validar_decimales()
-        if self.tipo == self.AJUSTE and not (self.motivo or "").strip():
-            raise ValidationError({"motivo": "Un ajuste necesita un motivo."})
+        self.validar_datos()
         # Siempre INSERT: un pk ya existente falla en vez de convertirse en UPDATE.
         kwargs["force_insert"] = True
         super().save(**kwargs)
@@ -352,7 +364,10 @@ class Movimiento(models.Model):
 
 
 @receiver(pre_save, sender=Movimiento)
-def _rechazar_carga_cruda_sobre_existente(sender, instance, raw=False, **kwargs):
-    """loaddata/deserialize guardan con raw=True y podrian sobrescribir un movimiento."""
-    if raw and instance.pk is not None and Movimiento.objects.filter(pk=instance.pk).exists():
+def _proteger_movimiento_en_pre_save(sender, instance, raw=False, using=None, **kwargs):
+    """Ultima barrera: corre en save(), loaddata/deserialize y save_base() directo.
+    Rechaza un pk ya existente (seria una sobrescritura) y datos que no cumplan
+    la precision o el motivo."""
+    if instance.pk is not None and Movimiento.objects.using(using).filter(pk=instance.pk).exists():
         raise MovimientoInmutable(MENSAJE_INMUTABLE)
+    instance.validar_datos()
