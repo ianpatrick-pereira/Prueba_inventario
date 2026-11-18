@@ -22,7 +22,8 @@ CLAVE = "Zq7-mPx2vL-prueba"
 
 MODELOS = ["categoria", "proveedor", "producto", "codigoalternativo", "productoproveedor",
            "documento", "movimiento"]
-PERSONALIZADOS = {"registrar_entrada", "registrar_salida", "registrar_ajuste", "revertir_movimiento"}
+PERSONALIZADOS = {"registrar_entrada", "registrar_salida", "registrar_ajuste", "revertir_movimiento",
+                  "permitir_stock_negativo"}
 # Escrita a mano, independiente de la migracion (D-38).
 OPERADOR = (
     {f"view_{m}" for m in MODELOS}
@@ -57,9 +58,17 @@ def test_los_grupos_existen_con_exactamente_los_permisos_de_d38():
         assert set(g.permissions.values_list("content_type__app_label", flat=True)) == {"inventario"}
 
 
+def test_tamanos_de_la_matriz_d38_y_d40():
+    assert len(OPERADOR) == 20 and len(codenames("Operador")) == 20
+    assert len(ADMINISTRADOR) == 33 and len(codenames("Administrador")) == 33
+    assert "permitir_stock_negativo" in codenames("Administrador")
+    assert "permitir_stock_negativo" not in codenames("Operador")
+
+
 def test_el_operador_no_puede_ajustar_revertir_ni_borrar():
     c = codenames("Operador")
-    assert not (c & {"registrar_ajuste", "revertir_movimiento", "add_movimiento", "change_movimiento"})
+    assert not (c & {"registrar_ajuste", "revertir_movimiento", "add_movimiento", "change_movimiento",
+                     "permitir_stock_negativo"})
     assert not {x for x in c if x.startswith("delete_")}
     assert not {"change_documento"} & c
 
@@ -309,3 +318,73 @@ def test_crear_administrador_rechaza_clave_corta(monkeypatch):
     with pytest.raises(CommandError):
         call_command("crear_administrador", "--usuario", "jefe")
     assert get_user_model().objects.count() == 0
+
+
+# H1 (D-40): permitir_negativo exige permiso propio
+def _intentos_con_negativo(producto, u, e):
+    return {
+        "salida": lambda: servicios.registrar_salida(producto, 1, u, permitir_negativo=True),
+        "ajuste": lambda: servicios.registrar_ajuste(producto, -1, u, "m", permitir_negativo=True),
+        "revertir": lambda: servicios.revertir(e, u, "m", permitir_negativo=True),
+    }
+
+
+def test_operador_con_permitir_negativo_rechazado_aunque_haya_stock(producto):
+    adm = usuario("adm", "Administrador")
+    servicios.registrar_entrada(producto, 100, adm)
+    e = servicios.registrar_entrada(producto, 1, adm)
+    op = usuario("op", "Operador")
+    op.user_permissions.add(Permission.objects.get(codename="registrar_ajuste"),
+                            Permission.objects.get(codename="revertir_movimiento"))
+    n = Movimiento.objects.count()
+    for nombre, intento in _intentos_con_negativo(producto, op, e).items():
+        with pytest.raises(PermissionDenied, match="permitir_stock_negativo"):
+            intento()
+    assert Movimiento.objects.count() == n
+
+
+def test_administrador_puede_usar_permitir_negativo(producto):
+    adm = usuario("adm", "Administrador")
+    e = servicios.registrar_entrada(producto, 2, adm)
+    servicios.registrar_salida(producto, 5, adm, permitir_negativo=True)
+    servicios.registrar_ajuste(producto, -3, adm, "m", permitir_negativo=True)
+    servicios.revertir(e, adm, "m", permitir_negativo=True)
+    assert servicios.stock_de(producto) == D("-8.00")
+
+
+def test_usuario_tecnico_con_el_permiso_puede_usar_permitir_negativo(producto):
+    tecnico = usuario("importador")
+    tecnico.user_permissions.add(Permission.objects.get(codename="registrar_salida"),
+                                 Permission.objects.get(codename="permitir_stock_negativo"))
+    servicios.registrar_salida(producto, 4, tecnico, permitir_negativo=True)
+    assert servicios.stock_de(producto) == D("-4.00")
+    solo_salida = usuario("solo")
+    solo_salida.user_permissions.add(Permission.objects.get(codename="registrar_salida"))
+    with pytest.raises(PermissionDenied):
+        servicios.registrar_salida(producto, 1, solo_salida, permitir_negativo=True)
+
+
+def test_el_permiso_negativo_no_reemplaza_el_de_la_operacion(producto):
+    solo_neg = usuario("neg")
+    solo_neg.user_permissions.add(Permission.objects.get(codename="permitir_stock_negativo"))
+    with pytest.raises(PermissionDenied):
+        servicios.registrar_salida(producto, 1, solo_neg, permitir_negativo=True)
+
+
+# H2: la reversa de la migracion no borra nada
+@pytest.mark.django_db(transaction=True, serialized_rollback=True)
+def test_migrar_cuentas_a_cero_y_volver_conserva_grupos_y_asignaciones():
+    u = usuario("ana", "Operador")
+    antes = (codenames("Operador"), codenames("Administrador"), set(u.groups.values_list("name", flat=True)))
+    call_command("migrate", "cuentas", "zero", verbosity=0)
+    assert Group.objects.filter(name__in=["Operador", "Administrador"]).count() == 2  # no se borro nada
+    assert set(u.groups.values_list("name", flat=True)) == {"Operador"}
+    call_command("migrate", "cuentas", verbosity=0)
+    despues = (codenames("Operador"), codenames("Administrador"), set(u.groups.values_list("name", flat=True)))
+    assert antes == despues
+    assert Group.objects.filter(name="Operador").count() == 1
+
+
+def test_la_reversa_de_la_migracion_es_noop():
+    migracion = importlib.import_module("cuentas.migrations.0001_grupos_y_permisos")
+    assert migracion.Migration.operations[0].reverse_code.__name__ == "noop"

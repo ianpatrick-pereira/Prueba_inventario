@@ -54,7 +54,7 @@ Hay dos grupos, «Administrador» y «Operador», que se crean solos al ejecutar
 python manage.py crear_administrador --usuario TU_USUARIO --superusuario
 ```
 
-Con `--superusuario` también puede crear usuarios y asignarles grupo en `/admin/`; sin él, solo administra el inventario. Alternativa: `python manage.py createsuperuser` y luego agregar la cuenta al grupo «Administrador» en `/admin/`. Para un operador: crear el usuario en `/admin/` y asignarle el grupo «Operador» (sin marcar «Es staff»). El ingreso es en `/cuentas/login/`.
+Con `--superusuario` también puede crear usuarios y asignarles grupo en `/admin/`; sin él, solo administra el inventario. Alternativa: `python manage.py createsuperuser` y luego agregar la cuenta al grupo «Administrador» en `/admin/`. Para un operador: crear el usuario en `/admin/` y asignarle el grupo «Operador» (sin marcar «Es staff»: nunca marques `is_staff` a un operador, porque le daría acceso a `/admin/`). El comando `crear_administrador` se usa solo de forma interactiva en una terminal, porque pide la contraseña por teclado. El ingreso es en `/cuentas/login/`.
 
 ### Pruebas
 

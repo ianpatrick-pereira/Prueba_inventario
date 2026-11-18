@@ -397,7 +397,7 @@ def test_sqlite_configurada_con_transacciones_immediate():
     assert settings.DATABASES["default"]["OPTIONS"]["timeout"] >= 10
 
 
-@pytest.mark.django_db(transaction=True)
+@pytest.mark.django_db(transaction=True, serialized_rollback=True)
 def test_dos_salidas_simultaneas_una_pasa_y_la_otra_es_stock_insuficiente(monkeypatch):
     import threading
     import time

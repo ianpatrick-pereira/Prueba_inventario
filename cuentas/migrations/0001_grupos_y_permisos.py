@@ -2,6 +2,7 @@
 
 Idempotente: get_or_create del grupo y permissions.set(...) con el conjunto exacto,
 así que correrla de nuevo deja el mismo resultado. No crea usuarios ni contraseñas.
+La reversa es un noop a proposito: nunca borra grupos ni sus asignaciones de usuarios.
 Si se agregan modelos o permisos nuevos a `inventario`, hace falta una migración de
 datos nueva (o actualizar esta lógica) para que los grupos los incluyan.
 """
@@ -38,14 +39,10 @@ def crear_grupos(apps, schema_editor):
     operador.permissions.set(todos.filter(codename__in=codenames_operador()))
 
 
-def borrar_grupos(apps, schema_editor):
-    apps.get_model("auth", "Group").objects.filter(name__in=["Administrador", "Operador"]).delete()
-
-
 class Migration(migrations.Migration):
     dependencies = [
         ("auth", "0012_alter_user_first_name_max_length"),
         ("contenttypes", "0002_remove_content_type_name"),
         ("inventario", "0003_permisos_movimiento"),
     ]
-    operations = [migrations.RunPython(crear_grupos, borrar_grupos)]
+    operations = [migrations.RunPython(crear_grupos, migrations.RunPython.noop)]

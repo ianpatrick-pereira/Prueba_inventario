@@ -291,6 +291,8 @@ class Movimiento(models.Model):
             ("registrar_salida", "Puede registrar salidas de stock"),
             ("registrar_ajuste", "Puede registrar ajustes y conteos de stock"),
             ("revertir_movimiento", "Puede revertir movimientos"),
+            # D-40: usar permitir_negativo=True en el servicio de stock.
+            ("permitir_stock_negativo", "Puede dejar el stock bajo cero (permitir_negativo)"),
         ]
         constraints = [
             models.CheckConstraint(
