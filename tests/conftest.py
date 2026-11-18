@@ -14,3 +14,16 @@ def django_db_modify_db_settings(django_db_modify_db_settings_parallel_suffix, t
 
     ruta = tmp_path_factory.mktemp("db_pruebas") / "pruebas.sqlite3"
     settings.DATABASES["default"].setdefault("TEST", {})["NAME"] = str(ruta)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    """Una prueba transaccional vacia la base al terminar; sin serialized_rollback=True se
+    llevaria los grupos y permisos de la migracion y rompe las pruebas siguientes."""
+    marca = item.get_closest_marker("django_db")
+    if marca and marca.kwargs.get("transaction") and not marca.kwargs.get("serialized_rollback"):
+        pytest.fail(
+            "Las pruebas con @pytest.mark.django_db(transaction=True) deben llevar también "
+            "serialized_rollback=True (si no, se pierden los grupos y permisos de las migraciones).",
+            pytrace=False,
+        )

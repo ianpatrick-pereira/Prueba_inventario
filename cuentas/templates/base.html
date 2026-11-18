@@ -5,12 +5,57 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block titulo %}Sistema de inventario{% endblock %}</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
-    .error { color: #b00020; }
-    label { display: block; margin-top: .75rem; }
+    body { font-family: system-ui, sans-serif; margin: 0; color: #1d1d1f; background: #f6f6f7; }
+    nav { background: #1f3a5f; padding: .6rem 1rem; display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; }
+    nav a, nav button { color: #fff; text-decoration: none; background: none; border: 0; font: inherit; cursor: pointer; padding: 0; }
+    nav a:hover, nav button:hover { text-decoration: underline; }
+    nav .derecha { margin-left: auto; display: flex; gap: 1rem; align-items: center; color: #dbe6f5; }
+    nav form { margin: 0; }
+    main { max-width: 64rem; margin: 1.5rem auto; padding: 0 1rem; }
+    h1 { margin-top: 0; }
+    table { border-collapse: collapse; width: 100%; background: #fff; }
+    th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #e2e2e5; }
+    th { background: #eceef2; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tr.bajo { background: #fdeaea; }
+    .etiqueta-bajo { color: #b00020; font-weight: 600; }
+    .error, .errorlist { color: #b00020; }
+    .errorlist { margin: .2rem 0; padding-left: 1.1rem; }
+    .mensajes { list-style: none; padding: 0; }
+    .mensajes li { padding: .6rem .8rem; margin-bottom: .5rem; border-radius: 4px; background: #e3f4e3; border: 1px solid #b6dcb6; }
+    .mensajes li.error { background: #fdeaea; border-color: #f0b8b8; }
+    label { display: block; margin-top: .75rem; font-weight: 600; }
+    input[type=text], input[type=number], input[type=search], select, textarea { padding: .4rem; min-width: 16rem; max-width: 100%; }
+    .ayuda { color: #555; font-size: .9rem; font-weight: 400; }
+    .boton, button[type=submit] { background: #1f3a5f; color: #fff; border: 0; border-radius: 4px; padding: .5rem .9rem; cursor: pointer; text-decoration: none; display: inline-block; font: inherit; }
+    .boton.secundario { background: #fff; color: #1f3a5f; border: 1px solid #1f3a5f; }
+    .boton.peligro, button.peligro { background: #b00020; }
+    .barra { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-bottom: 1rem; }
+    .tarjeta { background: #fff; padding: 1rem; border-radius: 6px; margin-bottom: 1rem; border: 1px solid #e2e2e5; }
+    .paginas { margin-top: 1rem; display: flex; gap: 1rem; }
+    .vacio { color: #555; padding: 1rem 0; }
   </style>
 </head>
 <body>
-  <main>{% block contenido %}{% endblock %}</main>
+  {% if user.is_authenticated %}
+  <nav>
+    <a href="{% url 'inicio' %}"><strong>Inventario</strong></a>
+    {% if perms.inventario.view_producto %}<a href="{% url 'producto_lista' %}">Productos</a>{% endif %}
+    {% if perms.inventario.view_proveedor %}<a href="{% url 'proveedor_lista' %}">Proveedores</a>{% endif %}
+    {% if perms.inventario.view_categoria %}<a href="{% url 'categoria_lista' %}">Categorías</a>{% endif %}
+    <span class="derecha">
+      <span>{{ user.get_username }}</span>
+      <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Cerrar sesión</button></form>
+    </span>
+  </nav>
+  {% endif %}
+  <main>
+    {% if messages %}
+      <ul class="mensajes" role="status">
+        {% for m in messages %}<li class="{{ m.tags }}">{{ m }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+    {% block contenido %}{% endblock %}
+  </main>
 </body>
 </html>

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block titulo %}Productos - Sistema de inventario{% endblock %}
+{% block contenido %}
+  <h1>Productos</h1>
+  <form method="get" class="barra" role="search">
+    <input type="search" name="q" value="{{ q }}" placeholder="Código, código de proveedor o nombre" autofocus aria-label="Buscar">
+    <button type="submit">Buscar</button>
+    {% if q %}<a class="boton secundario" href="{% url 'producto_lista' %}">Limpiar</a>{% endif %}
+    {% if perms.inventario.add_producto %}<a class="boton secundario" href="{% url 'producto_nuevo' %}">Nuevo producto</a>{% endif %}
+  </form>
+  {% if productos %}
+  <table>
+    <thead><tr><th>Código</th><th>Nombre</th><th>Categoría</th><th class="num">Stock</th><th class="num">Stock mínimo</th></tr></thead>
+    <tbody>
+    {% for p in productos %}
+      <tr{% if p.stock_min > 0 and p.stock <= p.stock_min %} class="bajo"{% endif %}>
+        <td><a href="{% url 'producto_detalle' p.pk %}">{{ p.sku }}</a></td>
+        <td>{{ p.nombre }}</td>
+        <td>{{ p.categoria.nombre|default:"-" }}</td>
+        <td class="num">{{ p.stock|floatformat:2 }}{% if p.stock_min > 0 and p.stock <= p.stock_min %} <span class="etiqueta-bajo">(bajo mínimo)</span>{% endif %}</td>
+        <td class="num">{{ p.stock_min|floatformat:2 }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if is_paginated %}
+  <div class="paginas">
+    {% if page_obj.has_previous %}<a href="?q={{ q|urlencode }}&amp;page={{ page_obj.previous_page_number }}">Anterior</a>{% endif %}
+    <span>Página {{ page_obj.number }} de {{ paginator.num_pages }}</span>
+    {% if page_obj.has_next %}<a href="?q={{ q|urlencode }}&amp;page={{ page_obj.next_page_number }}">Siguiente</a>{% endif %}
+  </div>
+  {% endif %}
+  {% else %}
+    <p class="vacio">{% if q %}No se encontraron productos para «{{ q }}».{% else %}Aún no hay productos.{% endif %}</p>
+  {% endif %}
+{% endblock %}

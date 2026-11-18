@@ -33,5 +33,6 @@ urlpatterns = [
     path("", inicio, name="inicio"),
     path("salud/", salud, name="salud"),
     path("cuentas/", include("cuentas.urls")),
+    path("", include("inventario.urls")),
     path("admin/", admin.site.urls),
 ]
