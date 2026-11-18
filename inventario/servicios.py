@@ -2,33 +2,41 @@
 
 El stock NO se guarda: es la suma de los movimientos (D-17). Toda escritura pasa por
 aqui: se hace dentro de transaction.atomic y bloquea el producto con select_for_update
-antes de leer el stock, para que dos operaciones simultaneas no lo dejen bajo cero.
-(SQLite ignora el bloqueo de fila, pero serializa las escrituras; PostgreSQL si lo aplica.)
+antes de leer el stock. En PostgreSQL eso bloquea la fila del producto. SQLite no tiene
+bloqueo de fila: select_for_update no hace nada, y la seguridad ante escrituras
+simultaneas viene de BEGIN IMMEDIATE (D-35, config/settings.py), que hace que cada
+transaccion de escritura espere a la anterior (hasta el timeout configurado).
 
 Reglas:
 - D-31: una salida, ajuste o reversa que deje el stock bajo cero se rechaza con
   StockInsuficiente, salvo permitir_negativo=True (reservado a los importadores,
   que deben reflejar la realidad).
 - D-32: un movimiento se corrige con una reversa: un ajuste de cantidad opuesta, con
-  motivo y vinculo al original (Movimiento.revierte). No se revierte una reversa.
+  motivo, vinculo al original (Movimiento.revierte) y el mismo documento. No se
+  revierte una reversa ni se revierte dos veces el mismo movimiento.
+- D-33: no se aceptan movimientos con fecha futura (lo valida el modelo).
+- D-34: D-31 controla SOLO el stock actual (la suma de todos los movimientos). Un
+  movimiento con fecha pasada (inventario inicial, tickets atrasados) puede dejar
+  saldos historicos negativos en el kardex; es aceptado y no se controla.
 
 Excepciones:
 - StockInsuficiente: subclase de ValidationError, a proposito: quien ya captura
   ValidationError (formularios, importadores) la trata como un rechazo de datos mas.
-  Lleva stock_actual y cantidad_pedida para mostrar un mensaje claro.
+  Lleva stock_actual y cantidad_pedida. OJO: se construye con un mensaje simple, asi
+  que NO tiene error_dict; para leer el texto usa .messages.
 - ValidationError: cantidad invalida (float, bool, <= 0, decimales de mas...), motivo
-  faltante, reversa no permitida.
+  faltante, fecha futura, reversa no permitida.
 - MovimientoInmutable: solo si alguien intenta modificar/borrar un movimiento.
-
-Limitacion: el control de negativos mira el stock total actual; un movimiento con fecha
-pasada no revisa los saldos historicos intermedios.
 """
-from decimal import Decimal, InvalidOperation
+import re
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import Sum, Value
+from django.db.models import OuterRef, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 
 from .models import Movimiento, Producto
 
@@ -50,14 +58,22 @@ class StockInsuficiente(ValidationError):
         )
 
 
+_NUMERO = re.compile(r"[+-]?\d+(\.\d+)?", re.ASCII)
+
+
 def _a_decimal(valor, nombre="cantidad"):
-    """Acepta Decimal, int o str. Rechaza float y bool (un float ya perdio precision)."""
-    if isinstance(valor, bool) or isinstance(valor, float) or valor is None:
-        raise ValidationError({nombre: "Debe ser un Decimal, un entero o un texto numérico."})
-    try:
-        dec = Decimal(str(valor).strip()) if isinstance(valor, str) else Decimal(valor)
-    except (InvalidOperation, TypeError, ValueError):
-        raise ValidationError({nombre: "Valor numérico no válido."})
+    """Acepta Decimal, int (no bool) y str decimal simple en ASCII (sin notacion
+    cientifica ni digitos no ASCII). Rechaza float, bool, tuplas y None."""
+    if isinstance(valor, Decimal):
+        dec = valor
+    elif isinstance(valor, int) and not isinstance(valor, bool):
+        dec = Decimal(valor)
+    elif isinstance(valor, str) and _NUMERO.fullmatch(valor.strip()):
+        dec = Decimal(valor.strip())
+    else:
+        raise ValidationError(
+            {nombre: "Debe ser un Decimal, un entero o un texto numérico simple (ej. 1.25)."}
+        )
     if not dec.is_finite():
         raise ValidationError({nombre: "Valor numérico no válido."})
     return dec
@@ -68,22 +84,46 @@ def _sumar(qs):
     return Decimal(total).quantize(_CENTAVO)
 
 
+def _limite_hasta(hasta):
+    """Devuelve (filtro, valor). date -> fin del dia local, inclusivo; datetime con zona
+    -> ese instante, inclusivo; datetime sin zona -> ValidationError."""
+    if isinstance(hasta, datetime):
+        if timezone.is_naive(hasta):
+            raise ValidationError({"hasta": "El datetime debe tener zona horaria."})
+        return "fecha__lte", hasta
+    if isinstance(hasta, date):
+        manana = datetime.combine(hasta + timedelta(days=1), time.min)
+        return "fecha__lt", timezone.make_aware(manana)
+    raise ValidationError({"hasta": "Debe ser una fecha o un datetime con zona horaria."})
+
+
 def stock_de(producto, hasta=None):
-    """Stock = suma de los movimientos (0 si no hay). `hasta`: datetime inclusivo."""
+    """Stock = suma de los movimientos (0 si no hay). `hasta` inclusivo: un datetime con
+    zona horaria, o una date (se toma hasta el fin de ese dia en la zona local)."""
     qs = Movimiento.objects.filter(producto=producto)
     if hasta is not None:
-        qs = qs.filter(fecha__lte=hasta)
+        filtro, limite = _limite_hasta(hasta)
+        qs = qs.filter(**{filtro: limite})
     return _sumar(qs)
 
 
 def productos_con_stock(queryset=None):
-    """Productos anotados con `stock`, en una sola consulta."""
+    """Productos anotados con `stock`, en una sola consulta.
+
+    Usa una subconsulta correlacionada: no depende de joins del queryset recibido, asi que
+    filtros por proveedor, codigos, movimientos, distinct o annotate previos no duplican la suma.
+    """
     if queryset is None:
         queryset = Producto.objects.all()
+    suma = (
+        Movimiento.objects.filter(producto=OuterRef("pk"))
+        .order_by()
+        .values("producto")
+        .annotate(s=Sum("cantidad"))
+        .values("s")
+    )
     return queryset.annotate(
-        stock=Coalesce(
-            Sum("movimiento__cantidad"), Value(CERO), output_field=_STOCK_FIELD
-        )
+        stock=Coalesce(Subquery(suma, output_field=_STOCK_FIELD), Value(CERO), output_field=_STOCK_FIELD)
     )
 
 
@@ -182,4 +222,5 @@ def revertir(movimiento, usuario, motivo, permitir_negativo=False):
         if Movimiento.objects.filter(revierte=original).exists():
             raise ValidationError("Este movimiento ya fue revertido.")
         return _crear(producto, Movimiento.AJUSTE, -original.cantidad, usuario, motivo=motivo,
-                      revierte=original, permitir_negativo=permitir_negativo)
+                      documento=original.documento, revierte=original,
+                      permitir_negativo=permitir_negativo)

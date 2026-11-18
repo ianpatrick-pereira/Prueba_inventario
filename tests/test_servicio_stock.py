@@ -1,5 +1,5 @@
 """Pruebas del servicio de stock (T-F1-04; decisiones D-17, D-31, D-32)."""
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 import pytest
@@ -49,14 +49,48 @@ def test_stock_es_exacto_con_centavos(producto, usuario):
     assert servicios.stock_de(producto) == D("1.00")
 
 
-def test_stock_con_hasta_excluye_lo_posterior(producto, usuario):
+def test_stock_con_hasta_datetime_excluye_lo_posterior(producto, usuario):
     ahora = timezone.now()
     entrada(producto, usuario, "10", fecha=ahora - timedelta(days=2))
     entrada(producto, usuario, "4", fecha=ahora - timedelta(days=1))
-    entrada(producto, usuario, "100", fecha=ahora + timedelta(days=1))
+    entrada(producto, usuario, "100", fecha=ahora)
     assert servicios.stock_de(producto, hasta=ahora - timedelta(days=1)) == D("14.00")  # inclusivo
     assert servicios.stock_de(producto, hasta=ahora - timedelta(days=3)) == D("0.00")
     assert servicios.stock_de(producto) == D("114.00")
+
+
+def test_hasta_datetime_con_zona_es_inclusivo_al_microsegundo(producto, usuario):
+    t = timezone.localtime(timezone.now() - timedelta(days=1)).replace(
+        hour=23, minute=59, second=59, microsecond=999999
+    )
+    entrada(producto, usuario, "5", fecha=t)
+    assert servicios.stock_de(producto, hasta=t) == D("5.00")
+    assert servicios.stock_de(producto, hasta=t - timedelta(microseconds=1)) == D("0.00")
+
+
+def test_hasta_date_incluye_todo_el_dia_local(producto, usuario):
+    ayer = timezone.localdate() - timedelta(days=1)
+    tarde = timezone.make_aware(datetime.combine(ayer, time(15, 0)))
+    ultimo = timezone.make_aware(datetime.combine(ayer, time(23, 59, 59, 999999)))
+    medianoche = timezone.make_aware(datetime.combine(ayer + timedelta(days=1), time(0, 0)))
+    entrada(producto, usuario, "1", fecha=tarde)
+    entrada(producto, usuario, "10", fecha=ultimo)
+    entrada(producto, usuario, "100", fecha=medianoche)  # ya es el dia siguiente
+    assert servicios.stock_de(producto, hasta=ayer) == D("11.00")
+    assert servicios.stock_de(producto, hasta=ayer - timedelta(days=1)) == D("0.00")
+    assert servicios.stock_de(producto, hasta=ayer + timedelta(days=1)) == D("111.00")
+
+
+def test_hasta_date_de_hoy_incluye_un_movimiento_de_hoy(producto, usuario):
+    entrada(producto, usuario, "5")  # fecha = ahora
+    assert servicios.stock_de(producto, hasta=timezone.localdate()) == D("5.00")
+
+
+def test_hasta_datetime_sin_zona_y_otros_tipos_rechazados(producto):
+    with pytest.raises(ValidationError):
+        servicios.stock_de(producto, hasta=datetime(2026, 1, 1, 12, 0))
+    with pytest.raises(ValidationError):
+        servicios.stock_de(producto, hasta="2026-01-01")
 
 
 # 2. productos_con_stock
@@ -293,18 +327,23 @@ def test_decimales_de_mas_y_basura_rechazados(producto, usuario, valor):
     assert Movimiento.objects.count() == 0
 
 
-# 9. atomicidad
-def test_si_el_guardado_falla_no_queda_movimiento_a_medias(producto, usuario, monkeypatch):
+# 9. atomicidad y bloqueo
+def test_si_falla_despues_de_escribir_no_queda_nada(producto, usuario, monkeypatch):
     entrada(producto, usuario, "5")
+    original = Movimiento.save
 
-    def falla(self, *a, **k):
-        raise IntegrityError("simulado")
+    def guarda_y_luego_falla(self, *a, **k):
+        original(self, *a, **k)  # la fila SI se escribe...
+        assert Movimiento.objects.filter(pk=self.pk).exists()
+        raise IntegrityError("simulado despues de escribir")
 
-    monkeypatch.setattr(Movimiento, "save", falla)
+    monkeypatch.setattr(Movimiento, "save", guarda_y_luego_falla)
     with pytest.raises(IntegrityError):
         servicios.registrar_salida(producto, "1", usuario)
+    with pytest.raises(IntegrityError):
+        servicios.ajustar_a_conteo(producto, "9", usuario, "conteo")
     monkeypatch.undo()
-    assert Movimiento.objects.count() == 1
+    assert Movimiento.objects.count() == 1  # ...pero la transaccion la deshizo
     assert servicios.stock_de(producto) == D("5.00")
 
 
@@ -317,19 +356,290 @@ def test_error_de_validacion_dentro_de_transaccion_externa_no_deja_residuos(prod
     assert servicios.stock_de(producto) == D("5.00")
 
 
-def test_escrituras_bloquean_el_producto(producto, usuario, monkeypatch):
-    llamadas = []
-    original = servicios._bloquear
+def test_se_bloquea_el_producto_antes_de_leer_el_stock(producto, usuario, monkeypatch):
+    eventos = []
+    bloquear, stock = servicios._bloquear, servicios.stock_de
 
-    def espia(p):
+    def espia_bloquear(p):
         assert transaction.get_connection().in_atomic_block
-        llamadas.append(p.pk)
-        return original(p)
+        eventos.append("bloquear")
+        return bloquear(p)
 
-    monkeypatch.setattr(servicios, "_bloquear", espia)
+    def espia_stock(*a, **k):
+        eventos.append("stock")
+        return stock(*a, **k)
+
+    monkeypatch.setattr(servicios, "_bloquear", espia_bloquear)
+    monkeypatch.setattr(servicios, "stock_de", espia_stock)
     e = entrada(producto, usuario, "5")
-    servicios.registrar_salida(producto, "1", usuario)
-    servicios.registrar_ajuste(producto, "1", usuario, "m")
-    servicios.ajustar_a_conteo(producto, "9", usuario, "m")
-    servicios.revertir(e, usuario, "m", permitir_negativo=True)
-    assert len(llamadas) == 5
+    assert eventos == ["bloquear"]
+    entrada(producto, usuario, "50")
+    for operacion in (
+        lambda: servicios.registrar_salida(producto, "1", usuario),
+        lambda: servicios.registrar_ajuste(producto, "-1", usuario, "m"),
+        lambda: servicios.ajustar_a_conteo(producto, "9", usuario, "m"),
+        lambda: servicios.revertir(e, usuario, "m"),
+    ):
+        eventos.clear()
+        operacion()
+        assert eventos[0] == "bloquear" and "stock" in eventos, eventos
+
+
+def test_sqlite_configurada_con_transacciones_immediate():
+    from django.conf import settings
+
+    assert settings.DATABASES["default"]["OPTIONS"]["transaction_mode"] == "IMMEDIATE"
+    assert settings.DATABASES["default"]["OPTIONS"]["timeout"] >= 10
+
+
+@pytest.mark.django_db(transaction=True)
+def test_dos_salidas_simultaneas_una_pasa_y_la_otra_es_stock_insuficiente():
+    import threading
+
+    from django.db import connection
+
+    u = get_user_model().objects.create_user("hilos", password="x-prueba-123")
+    p = Producto.objects.create(sku="H-1", nombre="hilos")
+    servicios.registrar_entrada(p, 10, u)
+    barrera = threading.Barrier(2)
+    resultados = []
+
+    def salida():
+        try:
+            barrera.wait(timeout=10)
+            servicios.registrar_salida(Producto.objects.get(pk=p.pk), 10, u)
+            resultados.append("ok")
+        except StockInsuficiente:
+            resultados.append("insuficiente")
+        except Exception as exc:  # noqa: BLE001 - se informa en la asercion
+            resultados.append(repr(exc))
+        finally:
+            connection.close()
+
+    hilos = [threading.Thread(target=salida) for _ in range(2)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join(timeout=60)
+    assert sorted(resultados) == ["insuficiente", "ok"], resultados
+    assert servicios.stock_de(p) == D("0.00")
+
+
+# 10. productos_con_stock no depende de los joins del queryset recibido
+@pytest.fixture
+def catalogo(usuario):
+    from inventario.models import CodigoAlternativo, ProductoProveedor, Proveedor
+
+    pa, pb = Proveedor.objects.create(nombre="A"), Proveedor.objects.create(nombre="B")
+    p1 = Producto.objects.create(sku="K-1", nombre="uno")
+    p2 = Producto.objects.create(sku="K-2", nombre="dos")
+    p3 = Producto.objects.create(sku="K-3", nombre="tres")
+    for prov in (pa, pb):  # p1 con los dos proveedores (duplicaria filas en el join)
+        ProductoProveedor.objects.create(producto=p1, proveedor=prov, codigo_proveedor="X1")
+    ProductoProveedor.objects.create(producto=p2, proveedor=pa, codigo_proveedor="X2")
+    for v in ("770001", "770002"):
+        CodigoAlternativo.objects.create(producto=p1, tipo="barras", valor=v)
+    CodigoAlternativo.objects.create(producto=p2, tipo="barras", valor="770003")
+    entrada(p1, usuario, "10")
+    servicios.registrar_salida(p1, "3", usuario)
+    entrada(p2, usuario, "5")
+    return pa, pb, p1, p2, p3
+
+
+def _real(qs):
+    return {p.pk: (p.stock, servicios.stock_de(p)) for p in qs}
+
+
+def _comprobar(qs, esperados, django_assert_num_queries):
+    with django_assert_num_queries(1):
+        filas = list(qs)
+    assert {p.pk for p in filas} == {p.pk for p in esperados}
+    for p in filas:
+        assert p.stock == servicios.stock_de(p)
+        assert isinstance(p.stock, D) and p.stock == p.stock.quantize(D("0.01"))
+
+
+def test_stock_con_filtro_por_dos_proveedores(catalogo, django_assert_num_queries):
+    pa, pb, p1, p2, _ = catalogo
+    qs = servicios.productos_con_stock(
+        Producto.objects.filter(productoproveedor__proveedor__in=[pa, pb]).distinct()
+    )
+    _comprobar(qs, [p1, p2], django_assert_num_queries)
+    assert {p.pk: p.stock for p in qs}[p1.pk] == D("7.00")
+
+
+def test_stock_con_filtro_por_proveedores_sin_distinct(catalogo):
+    pa, pb, p1, p2, _ = catalogo
+    qs = servicios.productos_con_stock(Producto.objects.filter(productoproveedor__proveedor__in=[pa, pb]))
+    for p in qs:  # p1 aparece repetido por el join, pero con el stock real cada vez
+        assert p.stock == servicios.stock_de(p)
+
+
+def test_stock_con_filtro_por_codigo_alternativo(catalogo, django_assert_num_queries):
+    _, _, p1, p2, _ = catalogo
+    qs = servicios.productos_con_stock(
+        Producto.objects.filter(codigoalternativo__valor__startswith="77").distinct()
+    )
+    _comprobar(qs, [p1, p2], django_assert_num_queries)
+
+
+def test_stock_con_filtro_por_tipo_de_movimiento(catalogo, django_assert_num_queries):
+    _, _, p1, p2, _ = catalogo
+    qs = servicios.productos_con_stock(Producto.objects.filter(movimiento__tipo="entrada").distinct())
+    _comprobar(qs, [p1, p2], django_assert_num_queries)
+    assert {p.pk: p.stock for p in qs}[p1.pk] == D("7.00")  # no solo las entradas
+
+
+def test_stock_con_distinct_y_con_annotate_previo(catalogo, django_assert_num_queries):
+    from django.db.models import Count
+
+    _, _, p1, p2, p3 = catalogo
+    qs = servicios.productos_con_stock(Producto.objects.annotate(n=Count("movimiento")))
+    _comprobar(qs, [p1, p2, p3], django_assert_num_queries)
+    assert {p.pk: p.n for p in qs}[p1.pk] == 2
+    _comprobar(servicios.productos_con_stock().distinct(), [p1, p2, p3], django_assert_num_queries)
+
+
+# 11. fecha futura (D-33)
+@pytest.mark.parametrize("operacion", ["entrada", "salida", "ajuste"])
+def test_fecha_futura_rechazada_en_el_servicio(producto, usuario, operacion):
+    entrada(producto, usuario, "50")
+    futura = timezone.now() + timedelta(hours=1)
+    with pytest.raises(ValidationError) as e:
+        if operacion == "entrada":
+            servicios.registrar_entrada(producto, 1, usuario, fecha=futura)
+        elif operacion == "salida":
+            servicios.registrar_salida(producto, 1, usuario, fecha=futura)
+        else:
+            servicios.registrar_ajuste(producto, 1, usuario, "m", fecha=futura)
+    assert "fecha" in e.value.error_dict
+    assert Movimiento.objects.count() == 1
+
+
+def test_fecha_futura_rechazada_en_bulk_create_y_save(producto, usuario):
+    futura = timezone.now() + timedelta(days=1)
+    m = Movimiento(producto=producto, usuario=usuario, tipo="entrada", cantidad=D("1"), fecha=futura)
+    with pytest.raises(ValidationError) as e:
+        Movimiento.objects.bulk_create([m])
+    assert "fecha" in e.value.error_dict
+    with pytest.raises(ValidationError):
+        m.save()
+    assert Movimiento.objects.count() == 0
+
+
+def test_fecha_dentro_de_la_tolerancia_se_acepta(producto, usuario):
+    entrada(producto, usuario, "1", fecha=timezone.now() + timedelta(minutes=2))
+    with pytest.raises(ValidationError):
+        entrada(producto, usuario, "1", fecha=timezone.now() + timedelta(minutes=6))
+    assert Movimiento.objects.count() == 1
+
+
+# 12. integridad de `revierte`
+def _reversa(producto, usuario, original, **cambios):
+    datos = dict(producto=producto, usuario=usuario, tipo="ajuste", cantidad=-original.cantidad,
+                 motivo="reversa", revierte=original)
+    datos.update(cambios)
+    return Movimiento(**datos)
+
+
+@pytest.fixture
+def original(producto, usuario):
+    return entrada(producto, usuario, "10")
+
+
+def _casos_invalidos(producto, usuario, original):
+    otro = Producto.objects.create(sku="OTRO-R", nombre="otro")
+    ya_revertido = servicios.revertir(original, usuario, "primera")  # es una reversa
+    return {
+        "reversa_de_reversa": _reversa(producto, usuario, ya_revertido),
+        "tipo_entrada": _reversa(producto, usuario, original, tipo="entrada", cantidad=D("10")),
+        "otro_producto": _reversa(otro, usuario, original),
+        "cantidad_distinta": _reversa(producto, usuario, original, cantidad=D("-9")),
+        "misma_cantidad_signo_igual": _reversa(producto, usuario, original, cantidad=D("10")),
+        "autorreferencia": Movimiento(pk=987, producto=producto, usuario=usuario, tipo="ajuste",
+                                      cantidad=D("1"), motivo="x", revierte_id=987),
+        "inexistente": Movimiento(producto=producto, usuario=usuario, tipo="ajuste",
+                                  cantidad=D("1"), motivo="x", revierte_id=424242),
+    }
+
+
+CASOS = ["reversa_de_reversa", "tipo_entrada", "otro_producto", "cantidad_distinta",
+         "misma_cantidad_signo_igual", "autorreferencia", "inexistente"]
+
+
+@pytest.mark.parametrize("caso", CASOS)
+def test_reversa_invalida_rechazada_por_save(producto, usuario, original, caso):
+    m = _casos_invalidos(producto, usuario, original)[caso]
+    n = Movimiento.objects.count()
+    with pytest.raises(ValidationError):
+        m.save()
+    assert Movimiento.objects.count() == n
+
+
+@pytest.mark.parametrize("caso", CASOS)
+def test_reversa_invalida_rechazada_por_bulk_create(producto, usuario, original, caso):
+    m = _casos_invalidos(producto, usuario, original)[caso]
+    n = Movimiento.objects.count()
+    with pytest.raises(ValidationError):
+        Movimiento.objects.bulk_create([m])
+    assert Movimiento.objects.count() == n
+
+
+@pytest.mark.parametrize("caso", ["reversa_de_reversa", "tipo_entrada", "otro_producto", "cantidad_distinta"])
+def test_reversa_invalida_rechazada_por_objects_create(producto, usuario, original, caso):
+    m = _casos_invalidos(producto, usuario, original)[caso]
+    with pytest.raises(ValidationError):
+        Movimiento.objects.create(
+            producto=m.producto, usuario=usuario, tipo=m.tipo, cantidad=m.cantidad,
+            motivo=m.motivo, revierte=m.revierte,
+        )
+
+
+def test_reversa_con_tipo_entrada_rechazada_por_la_base(producto, usuario, original):
+    from django.db import connection
+
+    with pytest.raises(IntegrityError) as e, transaction.atomic(), connection.cursor() as c:
+        c.execute(
+            "INSERT INTO inventario_movimiento"
+            " (producto_id, usuario_id, fecha, tipo, cantidad, motivo, revierte_id)"
+            " VALUES (%s, %s, '2026-01-01 00:00:00', 'entrada', 10, '', %s)",
+            [producto.pk, usuario.pk, original.pk],
+        )
+    assert "movimiento_revierte_solo_ajuste" in str(e.value)
+
+
+def test_reversa_valida_se_acepta(producto, usuario, original):
+    r = _reversa(producto, usuario, original)
+    r.save()
+    assert original.reversa == r
+
+
+# 13. la reversa hereda el documento (D-32)
+def test_reversa_hereda_el_documento_del_original(producto, usuario):
+    from inventario.models import Documento
+
+    doc = Documento.objects.create(tipo="venta", numero="T-1")
+    s = servicios.registrar_entrada(producto, 5, usuario, documento=doc)
+    r = servicios.revertir(s, usuario, "error")
+    assert r.documento == doc
+
+
+# 14. _a_decimal estricto
+@pytest.mark.parametrize("valor", [(0, (1, 5), -1), [1], "1e3", "1E-2", "١٢", "１２", "1.", ".5",
+                                   "1,5", "--1", "0x10", "Infinity", "NaN", b"1", {"a": 1}, 1 + 2j])
+def test_a_decimal_rechaza_tipos_y_formatos_raros(valor):
+    with pytest.raises(ValidationError):
+        servicios._a_decimal(valor)
+
+
+@pytest.mark.parametrize("valor,esperado", [("1.25", D("1.25")), ("+3", D("3")), ("-2.5", D("-2.5")),
+                                            (" 7 ", D("7")), (4, D("4")), (D("1.5"), D("1.5")), ("0077", D("77"))])
+def test_a_decimal_acepta_lo_permitido(valor, esperado):
+    assert servicios._a_decimal(valor) == esperado
+
+
+def test_stock_insuficiente_no_tiene_error_dict_pero_si_messages(producto, usuario):
+    with pytest.raises(StockInsuficiente) as e:
+        servicios.registrar_salida(producto, 1, usuario)
+    assert not hasattr(e.value, "error_dict")
+    assert "Stock insuficiente" in e.value.messages[0]
