@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block contenido %}
+  <h1>Sistema de inventario</h1>
+  <p>Usuario: <strong>{{ user.get_username }}</strong></p>
+  <p>Perfil: <strong>{{ perfil }}</strong></p>
+  <form method="post" action="{% url 'logout' %}">
+    {% csrf_token %}
+    <button type="submit">Cerrar sesión</button>
+  </form>
+{% endblock %}

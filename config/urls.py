@@ -16,16 +16,22 @@ Including another URLconf
 """
 
 from django.contrib import admin
+from django.contrib.auth.decorators import login_not_required
 from django.http import HttpResponse
-from django.urls import path
+from django.urls import include, path
+
+from cuentas.views import inicio
 
 
+@login_not_required
 def salud(request):
     """Ruta mínima para comprobar que el servidor responde."""
     return HttpResponse("OK", content_type="text/plain; charset=utf-8")
 
 
 urlpatterns = [
+    path("", inicio, name="inicio"),
     path("salud/", salud, name="salud"),
+    path("cuentas/", include("cuentas.urls")),
     path("admin/", admin.site.urls),
 ]

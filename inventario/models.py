@@ -285,6 +285,15 @@ class Movimiento(models.Model):
         ordering = ["-fecha", "-id"]
         # Django usa el base manager en operaciones internas: que sea el manager inmutable.
         base_manager_name = "objects"
+        # D-39: permisos que exige inventario/servicios.py (defensa en profundidad).
+        permissions = [
+            ("registrar_entrada", "Puede registrar entradas de stock"),
+            ("registrar_salida", "Puede registrar salidas de stock"),
+            ("registrar_ajuste", "Puede registrar ajustes y conteos de stock"),
+            ("revertir_movimiento", "Puede revertir movimientos"),
+            # D-40: usar permitir_negativo=True en el servicio de stock.
+            ("permitir_stock_negativo", "Puede dejar el stock bajo cero (permitir_negativo)"),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=Q(tipo__in=TIPOS_MOVIMIENTO),

@@ -6,7 +6,7 @@ Pensado para cualquier negocio que maneje volumen de inventario; el primer caso 
 
 ## Estado
 
-Fase 1 en curso: existe el proyecto Django base (configuración segura y ruta de salud) y los modelos del inventario (app `inventario`, visibles en /admin/). Hay un servicio de stock (`inventario/servicios.py`: stock, kardex, entradas, salidas, ajustes y reversas). Todavía no hay pantallas de negocio.
+Fase 1 en curso: existe el proyecto Django base (configuración segura y ruta de salud) y los modelos del inventario (app `inventario`, visibles en /admin/). Hay inicio de sesión con dos perfiles (administrador y operador) y un servicio de stock (`inventario/servicios.py`: stock, kardex, entradas, salidas, ajustes y reversas). Todavía no hay pantallas de negocio.
 
 ## Documentación
 
@@ -45,6 +45,16 @@ Equivalentes en Linux/macOS:
 - Instalar: `pip install -r requirements-dev.txt`
 - Copiar la configuración: `cp .env.example .env`
 - Migrar y arrancar: `python manage.py migrate && python manage.py runserver`
+
+### Usuarios y perfiles
+
+Hay dos grupos, «Administrador» y «Operador», que se crean solos al ejecutar `migrate` (no hay usuarios ni contraseñas por defecto). Para crear el primer administrador (la contraseña se pide por teclado, mínimo 10 caracteres):
+
+```
+python manage.py crear_administrador --usuario TU_USUARIO --superusuario
+```
+
+Con `--superusuario` también puede crear usuarios y asignarles grupo en `/admin/`; sin él, solo administra el inventario. Alternativa: `python manage.py createsuperuser` y luego agregar la cuenta al grupo «Administrador» en `/admin/`. Para un operador: crear el usuario en `/admin/` y asignarle el grupo «Operador» (sin marcar «Es staff»: nunca marques `is_staff` a un operador, porque le daría acceso a `/admin/`). El comando `crear_administrador` se usa solo de forma interactiva en una terminal, porque pide la contraseña por teclado. El ingreso es en `/cuentas/login/`.
 
 ### Pruebas
 
