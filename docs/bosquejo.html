@@ -1,0 +1,381 @@
+<title>Inventario v0.1</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap">
+<style>
+/* Layout: barra superior con pestañas, una vista a la vez; tablas densas tipo planilla de bodega */
+:root{
+  --bg:#f3f5f7; --panel:#ffffff; --fg:#17212b; --muted:#5b6876; --line:#dbe1e7;
+  --accent:#0f6e75; --accent-soft:#e1f0f1; --accent-fg:#ffffff;
+  --ok:#2f7d4f; --ok-soft:#e3f2e8; --warn:#9a6200; --warn-soft:#fbefd6; --bad:#b3261e; --bad-soft:#fbe4e2;
+  --font-display:"Space Grotesk",system-ui,sans-serif;
+  --font-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#11171d; --panel:#18212a; --fg:#e4eaf0; --muted:#97a4b1; --line:#2a3540;
+  --accent:#4fb3ba; --accent-soft:#16343a; --accent-fg:#0b1a1c;
+  --ok:#6cc38f; --ok-soft:#173326; --warn:#e8b04f; --warn-soft:#3a2c12; --bad:#f08a82; --bad-soft:#3d1c1a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#11171d; --panel:#18212a; --fg:#e4eaf0; --muted:#97a4b1; --line:#2a3540;
+  --accent:#4fb3ba; --accent-soft:#16343a; --accent-fg:#0b1a1c;
+  --ok:#6cc38f; --ok-soft:#173326; --warn:#e8b04f; --warn-soft:#3a2c12; --bad:#f08a82; --bad-soft:#3d1c1a; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:14px;line-height:1.5}
+.wrap{max-width:1100px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 48px}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding-block:20px 12px}
+.brand{display:flex;align-items:baseline;gap:10px}
+.brand h1{font-family:var(--font-display);font-size:22px;margin:0;letter-spacing:-.01em}
+.tag{font-family:var(--font-mono);font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:1px 6px}
+nav{display:flex;gap:4px;overflow-x:auto;border-bottom:1px solid var(--line);margin-bottom:20px}
+nav a{padding:10px 14px;color:var(--muted);text-decoration:none;font-weight:500;border-bottom:2px solid transparent;white-space:nowrap}
+nav a.on{color:var(--fg);border-color:var(--accent)}
+nav a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h2{font-family:var(--font-display);font-size:18px;margin:0 0 4px;text-wrap:balance}
+.lead{color:var(--muted);margin:0 0 16px;max-width:65ch}
+.grid{display:grid;gap:16px}
+.tiles{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+.two{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;min-width:0}
+.tile .k{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.tile .v{font-family:var(--font-display);font-size:28px;font-weight:600;font-variant-numeric:tabular-nums}
+.tile .v.warn{color:var(--warn)}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:500;padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+td.n,th.n{text-align:right}
+.mono{font-family:var(--font-mono);font-size:12.5px}
+.sub{color:var(--muted);font-size:12px}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:99px;white-space:nowrap}
+.pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.bad{background:var(--bad-soft);color:var(--bad)}
+.chip{display:inline-block;font-family:var(--font-mono);font-size:11px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:0 5px;margin:1px 3px 1px 0}
+.chip b{font-family:var(--font-body);font-weight:500;color:var(--muted)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
+label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);min-width:0}
+input,select,textarea{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:7px 9px;min-width:0}
+textarea{font-family:var(--font-mono);font-size:12.5px;width:100%;resize:vertical}
+input.qty{width:72px;text-align:right}
+button{font:inherit;font-weight:500;border-radius:6px;padding:7px 14px;border:1px solid var(--line);background:var(--panel);color:var(--fg);cursor:pointer}
+button.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+button.pri:disabled{opacity:.45;cursor:not-allowed}
+button.link{border:0;background:none;color:var(--accent);padding:4px 6px}
+button.x{border:0;background:none;color:var(--muted);padding:2px 8px;font-size:16px}
+.steps{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+.step{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.step span{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:600;font-size:11px}
+.notice{border-radius:6px;padding:10px 12px;font-size:13px}
+.notice.warn{background:var(--warn-soft);color:var(--warn)} .notice.ok{background:var(--ok-soft);color:var(--ok)}
+.empty{color:var(--muted);text-align:center;padding:24px}
+.plus{color:var(--ok)} .minus{color:var(--bad)}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 16px;border-radius:6px;font-size:13px}
+footer{margin-top:32px;color:var(--muted);font-size:12px;display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center}
+.stack{display:flex;flex-direction:column;gap:12px}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="brand"><h1>Inventario</h1><span class="tag">bosquejo v0.1</span></div>
+    <div class="sub">Datos de ejemplo · se guardan solo en este navegador</div>
+  </header>
+  <nav id="nav">
+    <a href="#resumen" data-v="resumen">Resumen</a>
+    <a href="#productos" data-v="productos">Productos</a>
+    <a href="#recepcion" data-v="recepcion">Recepción</a>
+    <a href="#pedido" data-v="pedido">Pedido</a>
+    <a href="#kardex" data-v="kardex">Kardex</a>
+  </nav>
+  <main id="view"></main>
+  <footer>
+    <span>El stock no se edita: se calcula sumando los movimientos del kardex.</span>
+    <button id="reset" class="link">Restaurar datos de ejemplo</button>
+  </footer>
+</div>
+<div id="toast" hidden></div>
+
+<script>
+const KEY='inventario-bosquejo-v1';
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const norm=s=>String(s||'').toUpperCase().replace(/\s+/g,'');
+const clp=n=>'$'+Math.round(n).toLocaleString('es-CL');
+const fecha=iso=>new Date(iso).toLocaleDateString('es-CL',{day:'2-digit',month:'2-digit'});
+const diasAtras=d=>new Date(Date.now()-d*864e5).toISOString();
+
+function seed(){
+  const P=(sku,nombre,cat,costo,min,max,prov,barra)=>({id:uid(),sku,nombre,categoria:cat,costo,min,max,
+    codigos:[...(prov?[{tipo:'Proveedor',valor:prov}]:[]),...(barra?[{tipo:'Barras',valor:barra}]:[])]});
+  const p=[
+    P('FA-001','Filtro aceite tipo W712','Filtros aceite',3200,4,12,'PRV-1001','7800000000011'),
+    P('FA-002','Filtro aceite tipo W610','Filtros aceite',2900,4,10,'PRV-1002','7800000000028'),
+    P('FA-003','Filtro aceite tipo W67/1','Filtros aceite',3500,3,8,'PRV-1003',''),
+    P('FAI-001','Filtro aire panel 240x180','Filtros aire',5400,2,6,'PRV-2001','7800000000059'),
+    P('FAI-002','Filtro aire redondo 165','Filtros aire',6100,2,5,'PRV-2002',''),
+    P('FC-001','Filtro combustible en línea','Filtros combustible',4800,2,6,'PRV-3001','7800000000073'),
+    P('FH-001','Filtro habitáculo carbón','Filtros habitáculo',4200,2,6,'PRV-4001',''),
+    P('AC-001','Aceite 10W-40 sintético 4 L','Aceites',18900,3,10,'PRV-5001','7800000000097'),
+    P('AC-002','Aceite 5W-30 sintético 4 L','Aceites',24500,3,8,'PRV-5002','7800000000103'),
+    P('RF-001','Refrigerante 50% 1 L','Líquidos',3900,4,12,'PRV-6001',''),
+  ];
+  const ini=[10,8,5,4,4,5,3,8,6,10], vend=[8,3,4,3,1,4,1,3,5,2];
+  const m=[];
+  p.forEach((x,i)=>{
+    m.push({id:uid(),fecha:diasAtras(28),productoId:x.id,tipo:'Entrada',cantidad:ini[i],documento:'Inventario inicial',nota:''});
+    for(let k=0;k<vend[i];k++) m.push({id:uid(),fecha:diasAtras(25-k*3),productoId:x.id,tipo:'Salida',cantidad:-1,documento:'Venta',nota:''});
+  });
+  m.push({id:uid(),fecha:diasAtras(6),productoId:p[2].id,tipo:'Ajuste',cantidad:-1,documento:'Conteo físico',nota:'Caja dañada'});
+  return {productos:p,movimientos:m,pedidos:[]};
+}
+function load(){try{const r=localStorage.getItem(KEY);return r?JSON.parse(r):null}catch(e){return null}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){}}
+let db=load()||seed();
+
+const stock=id=>db.movimientos.reduce((s,m)=>m.productoId===id?s+m.cantidad:s,0);
+const prod=id=>db.productos.find(p=>p.id===id);
+const porCodigo=c=>{const n=norm(c);if(!n)return null;return db.productos.find(p=>norm(p.sku)===n||p.codigos.some(k=>norm(k.valor)===n))||null};
+const estado=p=>{const s=stock(p.id);return s<=0?['bad','Sin stock']:s<=p.min?['warn','Bajo mínimo']:['ok','OK']};
+const codProv=p=>(p.codigos.find(k=>k.tipo==='Proveedor')||{}).valor||p.sku;
+function toast(t){const e=$('#toast');e.textContent=t;e.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>e.hidden=true,2200)}
+function mover(productoId,tipo,cantidad,documento,nota){db.movimientos.push({id:uid(),fecha:new Date().toISOString(),productoId,tipo,cantidad,documento,nota:nota||''})}
+
+/* ---------- Vistas ---------- */
+const V={};
+
+V.resumen=()=>{
+  const bajos=db.productos.filter(p=>stock(p.id)<=p.min);
+  const valor=db.productos.reduce((s,p)=>s+Math.max(stock(p.id),0)*p.costo,0);
+  const ult=[...db.movimientos].sort((a,b)=>b.fecha.localeCompare(a.fecha)).slice(0,6);
+  return `<div class="grid tiles" style="margin-bottom:16px">
+    <div class="panel tile"><div class="k">Productos</div><div class="v">${db.productos.length}</div></div>
+    <div class="panel tile"><div class="k">Bajo mínimo</div><div class="v ${bajos.length?'warn':''}">${bajos.length}</div></div>
+    <div class="panel tile"><div class="k">Valor en bodega (costo)</div><div class="v">${clp(valor)}</div></div>
+    <div class="panel tile"><div class="k">Movimientos registrados</div><div class="v">${db.movimientos.length}</div></div>
+  </div>
+  <div class="grid two">
+    <div class="panel"><h2>Hay que reponer</h2><p class="lead">Productos con stock igual o menor a su mínimo.</p>
+      ${bajos.length?`<div class="scroll"><table><tr><th>Producto</th><th class="n">Stock</th><th class="n">Mín.</th><th></th></tr>
+      ${bajos.map(p=>{const[c,t]=estado(p);return`<tr><td>${esc(p.nombre)}<div class="sub mono">${esc(p.sku)}</div></td><td class="n">${stock(p.id)}</td><td class="n">${p.min}</td><td><span class="pill ${c}">${t}</span></td></tr>`}).join('')}</table></div>
+      <p style="margin:12px 0 0"><a href="#pedido"><button class="pri">Armar pedido</button></a></p>`:`<div class="empty">Todo sobre el mínimo.</div>`}
+    </div>
+    <div class="panel"><h2>Últimos movimientos</h2><p class="lead">Lo más reciente del kardex.</p>
+      <div class="scroll"><table><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th class="n">Cant.</th></tr>
+      ${ult.map(m=>`<tr><td class="mono">${fecha(m.fecha)}</td><td>${esc(prod(m.productoId)?.nombre)}</td><td>${m.tipo}</td><td class="n ${m.cantidad>0?'plus':'minus'}">${m.cantidad>0?'+':''}${m.cantidad}</td></tr>`).join('')}</table></div>
+    </div>
+  </div>`;
+};
+
+let filtroProd='', formProd=false;
+V.productos=()=>{
+  const f=norm(filtroProd);
+  const lista=db.productos.filter(p=>!f||norm(p.nombre+p.sku+p.categoria).includes(f)||p.codigos.some(k=>norm(k.valor).includes(f)));
+  return `<div class="row" style="justify-content:space-between;margin-bottom:12px">
+    <div><h2>Catálogo</h2><p class="lead" style="margin:0">Busca por nombre o por cualquier código: interno, del proveedor o de barras.</p></div>
+    <button class="pri" data-act="toggleForm">${formProd?'Cerrar':'Nuevo producto'}</button></div>
+  ${formProd?`<form class="panel stack" id="fProd" style="margin-bottom:16px">
+    <div class="row">
+      <label>Código interno<input id="pSku" required placeholder="FA-010"></label>
+      <label style="flex:1 1 220px">Nombre<input id="pNom" required placeholder="Filtro aceite tipo W..."></label>
+      <label>Categoría<input id="pCat" list="cats" placeholder="Filtros aceite"></label>
+    </div>
+    <div class="row">
+      <label>Costo<input id="pCosto" type="number" min="0" value="0" class="qty" style="width:110px"></label>
+      <label>Mínimo<input id="pMin" type="number" min="0" value="2" class="qty"></label>
+      <label>Máximo<input id="pMax" type="number" min="0" value="6" class="qty"></label>
+      <label>Código proveedor<input id="pProv" placeholder="PRV-...."></label>
+      <label>Código de barras<input id="pBar" placeholder="780..."></label>
+      <button class="pri" type="submit">Guardar producto</button>
+    </div>
+    <datalist id="cats">${[...new Set(db.productos.map(p=>p.categoria))].map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
+  </form>`:''}
+  <div class="panel">
+    <input id="buscar" placeholder="Buscar… (prueba con PRV-2001 o 7800000000011)" value="${esc(filtroProd)}" style="width:100%;margin-bottom:8px">
+    <div class="scroll"><table><tr><th>Código</th><th>Producto</th><th>Códigos alternativos</th><th class="n">Stock</th><th class="n">Mín / Máx</th><th class="n">Costo</th><th>Estado</th><th></th></tr>
+    ${lista.map(p=>{const[c,t]=estado(p);return`<tr><td class="mono">${esc(p.sku)}</td><td>${esc(p.nombre)}<div class="sub">${esc(p.categoria)}</div></td>
+      <td>${p.codigos.map(k=>`<span class="chip"><b>${esc(k.tipo)}</b> ${esc(k.valor)}</span>`).join('')||'<span class="sub">—</span>'}</td>
+      <td class="n"><strong>${stock(p.id)}</strong></td><td class="n">${p.min} / ${p.max}</td><td class="n">${clp(p.costo)}</td>
+      <td><span class="pill ${c}">${t}</span></td><td><button class="link" data-act="verKardex" data-id="${p.id}">Kardex</button></td></tr>`}).join('')||`<tr><td colspan="8" class="empty">Ningún producto coincide.</td></tr>`}
+    </table></div>
+  </div>`;
+};
+
+let rec={doc:'',lineas:[]};
+V.recepcion=()=>{
+  const sinMatch=rec.lineas.filter(l=>!l.productoId).length;
+  const total=rec.lineas.reduce((s,l)=>s+(+l.cantidad||0),0);
+  return `<h2>Recepción de mercadería</h2>
+  <p class="lead">Carga la factura completa de una vez. Nada entra al stock hasta que revises la vista previa y confirmes.</p>
+  <div class="steps"><div class="step"><span>1</span>Cargar líneas</div><div class="step"><span>2</span>Revisar y asociar códigos</div><div class="step"><span>3</span>Confirmar ingreso</div></div>
+  <div class="grid two" style="margin-bottom:16px">
+    <div class="panel stack">
+      <strong>Pegar líneas de la factura</strong>
+      <span class="sub">Una línea por producto: código y cantidad. Sirve texto copiado de un PDF, Excel o WhatsApp.</span>
+      <textarea id="pegar" rows="6" placeholder="PRV-1001  6&#10;PRV-2001  2&#10;XYZ-777   4"></textarea>
+      <div class="row"><button data-act="pegar">Agregar a la vista previa</button><button class="link" data-act="ejemplo">Usar factura de ejemplo</button></div>
+    </div>
+    <div class="panel stack">
+      <strong>Escanear o escribir un código</strong>
+      <span class="sub">Con lector de código de barras: cada lectura suma 1. Presiona Enter.</span>
+      <input id="scan" placeholder="Código y Enter" autocomplete="off">
+      <span class="sub">Fase 2: sacar una foto de la factura; la IA leerá nombre, código, precio y cantidad. Foto, texto y escáner llegan a la misma vista previa.</span>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="row" style="justify-content:space-between;margin-bottom:8px">
+      <strong>Vista previa</strong>
+      <label style="flex-direction:row;align-items:center;gap:8px">N° de factura<input id="doc" value="${esc(rec.doc)}" placeholder="Ej. 4521" style="width:120px"></label>
+    </div>
+    ${rec.lineas.length?`<div class="scroll"><table><tr><th>Código leído</th><th>Producto en el sistema</th><th class="n">Stock actual</th><th class="n">Cantidad</th><th class="n">Stock nuevo</th><th></th></tr>
+    ${rec.lineas.map((l,i)=>{const p=l.productoId&&prod(l.productoId);return`<tr>
+      <td class="mono">${esc(l.codigo)}</td>
+      <td>${p?`${esc(p.nombre)} <span class="sub mono">${esc(p.sku)}</span>`:
+        `<div class="stack" style="gap:4px"><span class="pill warn" style="align-self:start">Código desconocido</span>
+         <select data-act="asociar" data-i="${i}"><option value="">Asociar a un producto…</option>${db.productos.map(x=>`<option value="${x.id}">${esc(x.sku)} · ${esc(x.nombre)}</option>`).join('')}</select>
+         <span class="sub">Se guardará como código de proveedor para la próxima vez.</span></div>`}</td>
+      <td class="n">${p?stock(p.id):'—'}</td>
+      <td class="n"><input class="qty" type="number" min="1" value="${l.cantidad}" data-act="cant" data-i="${i}" aria-label="Cantidad"></td>
+      <td class="n"><strong>${p?stock(p.id)+(+l.cantidad||0):'—'}</strong></td>
+      <td><button class="x" data-act="quitar" data-i="${i}" aria-label="Quitar línea">×</button></td></tr>`}).join('')}
+    </table></div>
+    <div class="row" style="justify-content:space-between;margin-top:12px">
+      ${sinMatch?`<div class="notice warn">${sinMatch} código(s) sin asociar. Asócialos para poder confirmar.</div>`:`<div class="notice ok">${rec.lineas.length} línea(s), ${total} unidad(es) listas para ingresar.</div>`}
+      <div class="row"><button data-act="limpiar">Vaciar</button><button class="pri" data-act="confirmar" ${sinMatch?'disabled':''}>Confirmar ingreso</button></div>
+    </div>`:`<div class="empty">Todavía no hay líneas. Pega la factura o escanea un código.</div>`}
+  </div>`;
+};
+
+let pedidoCant={};
+V.pedido=()=>{
+  const bajos=db.productos.filter(p=>stock(p.id)<=p.min);
+  bajos.forEach(p=>{if(pedidoCant[p.id]==null)pedidoCant[p.id]=Math.max(p.max-stock(p.id),0)});
+  const lineas=bajos.filter(p=>+pedidoCant[p.id]>0);
+  const hoy=new Date().toLocaleDateString('es-CL');
+  const texto=`Pedido ${hoy}\n`+lineas.map(p=>`• ${codProv(p)}  ${p.nombre}  x${pedidoCant[p.id]}`).join('\n');
+  return `<h2>Pedido al proveedor</h2>
+  <p class="lead">Sugerido = máximo − stock actual. Ajusta las cantidades y copia el mensaje. Usa el código del proveedor cuando existe.</p>
+  <div class="grid two">
+    <div class="panel">${bajos.length?`<div class="scroll"><table><tr><th>Producto</th><th class="n">Stock</th><th class="n">Mín / Máx</th><th class="n">Pedir</th></tr>
+      ${bajos.map(p=>`<tr><td>${esc(p.nombre)}<div class="sub mono">${esc(codProv(p))}</div></td><td class="n">${stock(p.id)}</td><td class="n">${p.min} / ${p.max}</td>
+      <td class="n"><input class="qty" type="number" min="0" value="${pedidoCant[p.id]}" data-act="pcant" data-id="${p.id}" aria-label="Cantidad a pedir"></td></tr>`).join('')}</table></div>`
+      :`<div class="empty">No hay productos bajo el mínimo.</div>`}</div>
+    <div class="panel stack"><strong>Mensaje para WhatsApp</strong>
+      <textarea id="msg" rows="${Math.max(lineas.length+2,5)}" readonly>${esc(texto)}</textarea>
+      <div class="row"><button class="pri" data-act="copiar" ${lineas.length?'':'disabled'}>Copiar mensaje</button>
+      <span class="sub">${lineas.length} producto(s), ${lineas.reduce((s,p)=>s+(+pedidoCant[p.id]),0)} unidades · costo estimado ${clp(lineas.reduce((s,p)=>s+p.costo*pedidoCant[p.id],0))}</span></div>
+    </div>
+  </div>`;
+};
+
+let kFiltro='';
+V.kardex=()=>{
+  const movs=db.movimientos.filter(m=>!kFiltro||m.productoId===kFiltro).sort((a,b)=>b.fecha.localeCompare(a.fecha));
+  let saldo=kFiltro?stock(kFiltro):null;
+  const opts=db.productos.map(p=>`<option value="${p.id}" ${p.id===kFiltro?'selected':''}>${esc(p.sku)} · ${esc(p.nombre)}</option>`).join('');
+  return `<h2>Kardex</h2><p class="lead">Registro de cada entrada, salida y ajuste. Elige un producto para ver su saldo línea por línea.</p>
+  <form class="panel row" id="fMov" style="margin-bottom:16px">
+    <label style="flex:1 1 220px">Producto<select id="mProd" required><option value="">Elegir…</option>${opts}</select></label>
+    <label>Tipo<select id="mTipo"><option>Salida</option><option>Ajuste +</option><option>Ajuste −</option></select></label>
+    <label>Cantidad<input id="mCant" type="number" min="1" value="1" class="qty"></label>
+    <label style="flex:1 1 160px">Motivo<input id="mNota" placeholder="Obligatorio en ajustes"></label>
+    <button class="pri" type="submit">Registrar</button>
+  </form>
+  <div class="panel">
+    <label style="margin-bottom:8px">Ver<select id="kFiltro"><option value="">Todos los productos</option>${opts}</select></label>
+    <div class="scroll"><table><tr><th>Fecha</th>${kFiltro?'':'<th>Producto</th>'}<th>Tipo</th><th>Documento</th><th>Motivo</th><th class="n">Cant.</th>${kFiltro?'<th class="n">Saldo</th>':''}</tr>
+    ${movs.map(m=>{const row=`<tr><td class="mono">${fecha(m.fecha)}</td>${kFiltro?'':`<td>${esc(prod(m.productoId)?.nombre)}</td>`}<td>${m.tipo}</td><td>${esc(m.documento)}</td><td class="sub">${esc(m.nota)||'—'}</td>
+      <td class="n ${m.cantidad>0?'plus':'minus'}">${m.cantidad>0?'+':''}${m.cantidad}</td>${kFiltro?`<td class="n"><strong>${saldo}</strong></td>`:''}</tr>`;if(kFiltro)saldo-=m.cantidad;return row}).join('')||`<tr><td colspan="7" class="empty">Sin movimientos.</td></tr>`}
+    </table></div>
+  </div>`;
+};
+
+/* ---------- Router y eventos ---------- */
+const vistas=Object.keys(V);
+function render(){
+  const v=vistas.includes(location.hash.slice(1))?location.hash.slice(1):'resumen';
+  document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('on',a.dataset.v===v));
+  $('#view').innerHTML=V[v]();
+}
+window.addEventListener('hashchange',render);
+
+function agregarLinea(codigo,cant){
+  const p=porCodigo(codigo);
+  const ex=rec.lineas.find(l=>norm(l.codigo)===norm(codigo));
+  if(ex) ex.cantidad=(+ex.cantidad)+cant; else rec.lineas.push({codigo:codigo.trim(),cantidad:cant,productoId:p?p.id:null});
+}
+function parsear(txt){
+  let n=0;
+  txt.split(/\r?\n/).forEach(l=>{
+    const t=l.trim().split(/[\t;,]+|\s{1,}/).filter(Boolean); if(!t.length)return;
+    let cant=1; if(t.length>1&&/^\d+$/.test(t[t.length-1])) cant=+t.pop();
+    agregarLinea(t[0],cant); n++;
+  });
+  return n;
+}
+
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-act]'); if(!b||b.tagName==='SELECT'||b.tagName==='INPUT')return;
+  const a=b.dataset.act;
+  if(a==='toggleForm'){formProd=!formProd;render()}
+  if(a==='verKardex'){kFiltro=b.dataset.id;location.hash='kardex';render()}
+  if(a==='pegar'){const n=parsear($('#pegar').value);toast(n?`${n} línea(s) agregadas`:'No se encontraron líneas');render()}
+  if(a==='ejemplo'){parsear('PRV-1001  6\nPRV-1003  4\n7800000000059  2\nWX-9921  3\nPRV-5002  4');render()}
+  if(a==='quitar'){rec.lineas.splice(+b.dataset.i,1);render()}
+  if(a==='limpiar'){rec={doc:'',lineas:[]};render()}
+  if(a==='confirmar'){
+    const doc='Factura '+(rec.doc||'s/n');
+    rec.lineas.forEach(l=>{if(+l.cantidad>0)mover(l.productoId,'Entrada',+l.cantidad,doc)});
+    const n=rec.lineas.length; rec={doc:'',lineas:[]}; pedidoCant={}; save(); toast(`Ingreso confirmado: ${n} producto(s)`); render();
+  }
+  if(a==='copiar'){
+    const t=$('#msg').value;
+    const fb=()=>{$('#msg').select();toast('Texto seleccionado: cópialo con Ctrl+C')};
+    try{navigator.clipboard.writeText(t).then(()=>toast('Mensaje copiado'),fb)}catch(err){fb()}
+  }
+});
+document.addEventListener('input',e=>{
+  const t=e.target;
+  if(t.id==='buscar'){filtroProd=t.value;const pos=t.selectionStart;render();const n=$('#buscar');n.focus();n.setSelectionRange(pos,pos)}
+  if(t.id==='doc')rec.doc=t.value;
+});
+document.addEventListener('change',e=>{
+  const t=e.target,a=t.dataset.act;
+  if(a==='cant'){rec.lineas[+t.dataset.i].cantidad=Math.max(1,+t.value||1);render()}
+  if(a==='pcant'){pedidoCant[t.dataset.id]=Math.max(0,+t.value||0);render()}
+  if(a==='asociar'&&t.value){
+    const l=rec.lineas[+t.dataset.i],p=prod(t.value);
+    p.codigos.push({tipo:'Proveedor',valor:l.codigo}); l.productoId=p.id; save();
+    toast(`${l.codigo} quedó asociado a ${p.sku}`); render();
+  }
+  if(t.id==='kFiltro'){kFiltro=t.value;render()}
+});
+document.addEventListener('keydown',e=>{
+  if(e.target.id==='scan'&&e.key==='Enter'){
+    e.preventDefault(); const v=e.target.value.trim(); if(!v)return;
+    agregarLinea(v,1); render(); $('#scan').focus();
+  }
+});
+document.addEventListener('submit',e=>{
+  e.preventDefault();
+  if(e.target.id==='fProd'){
+    const sku=$('#pSku').value.trim();
+    if(porCodigo(sku)){toast('Ese código ya existe');return}
+    const cod=[];if($('#pProv').value.trim())cod.push({tipo:'Proveedor',valor:$('#pProv').value.trim()});if($('#pBar').value.trim())cod.push({tipo:'Barras',valor:$('#pBar').value.trim()});
+    db.productos.push({id:uid(),sku,nombre:$('#pNom').value.trim(),categoria:$('#pCat').value.trim()||'Sin categoría',costo:+$('#pCosto').value||0,min:+$('#pMin').value||0,max:+$('#pMax').value||0,codigos:cod});
+    formProd=false; save(); toast('Producto guardado'); render();
+  }
+  if(e.target.id==='fMov'){
+    const id=$('#mProd').value,tipo=$('#mTipo').value,c=Math.max(1,+$('#mCant').value||1),nota=$('#mNota').value.trim();
+    if(tipo!=='Salida'&&!nota){toast('Escribe el motivo del ajuste');return}
+    const signo=tipo==='Ajuste +'?1:-1;
+    mover(id,tipo==='Salida'?'Salida':'Ajuste',signo*c,tipo==='Salida'?'Venta / uso':'Ajuste manual',nota);
+    save(); toast('Movimiento registrado'); render();
+  }
+});
+let resetArmado=false;
+$('#reset').addEventListener('click',e=>{
+  if(!resetArmado){resetArmado=true;e.target.textContent='¿Seguro? Se borra lo que cargaste. Clic otra vez';setTimeout(()=>{resetArmado=false;e.target.textContent='Restaurar datos de ejemplo'},4000);return}
+  db=seed();rec={doc:'',lineas:[]};pedidoCant={};kFiltro='';save();resetArmado=false;e.target.textContent='Restaurar datos de ejemplo';toast('Datos de ejemplo restaurados');render();
+});
+render();
+</script>
