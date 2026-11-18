@@ -238,3 +238,225 @@ def test_proveedor_sin_rut_multiple_y_rut_unico():
 def test_documento_acepta_fecha_y_str():
     d = Documento.objects.create(tipo="venta", nombre="Ticket 5", fecha=date(2026, 1, 2))
     assert "Venta" in str(d)
+
+
+# ---------------------------------------------------------------------------
+# Correcciones de la auditoria de T-F1-03
+# ---------------------------------------------------------------------------
+from django.core import serializers  # noqa: E402
+from django.contrib import admin as django_admin  # noqa: E402
+from django.db.models import ProtectedError  # noqa: E402
+from django.test import RequestFactory  # noqa: E402
+
+from inventario.admin import MovimientoAdmin  # noqa: E402
+from inventario.models import Categoria  # noqa: E402
+
+
+def _constraint(excinfo, nombre):
+    assert nombre in str(excinfo.value), str(excinfo.value)
+
+
+# 1. save() siempre INSERT
+def test_save_con_pk_existente_falla_y_no_cambia_la_fila(producto, usuario):
+    original = mov(producto, usuario, "entrada", "5")
+    original.save()
+    nuevo = mov(producto, usuario, "entrada", "99")
+    nuevo.pk = original.pk
+    with pytest.raises(IntegrityError), transaction.atomic():
+        nuevo.save()
+    assert Movimiento.objects.get(pk=original.pk).cantidad == Decimal("5.00")
+    assert Movimiento.objects.count() == 1
+
+
+# 2. tipo valido en la base
+@pytest.mark.parametrize("tipo", ["ENTRADA", "", "otro"])
+def test_movimiento_tipo_invalido_rechazado_por_la_base(producto, usuario, tipo):
+    with pytest.raises(IntegrityError) as e, transaction.atomic():
+        Movimiento.objects.bulk_create([mov(producto, usuario, tipo, "5", "m")])
+    _constraint(e, "movimiento_tipo_valido")
+
+
+@pytest.mark.parametrize("tipo", ["FACTURA", "", "otro"])
+def test_documento_tipo_invalido_rechazado_por_la_base(tipo):
+    with pytest.raises(IntegrityError) as e, transaction.atomic():
+        Documento.objects.bulk_create([Documento(tipo=tipo, fecha=date(2026, 1, 1))])
+    _constraint(e, "documento_tipo_valido")
+
+
+# 3 y 4. precision
+@pytest.mark.parametrize("cantidad", ["0.001", "1.005", "99999999999999.999", "10000000000.00"])
+def test_cantidad_con_exceso_de_precision_rechazada(producto, usuario, cantidad):
+    with pytest.raises(ValidationError) as e:
+        mov(producto, usuario, "entrada", cantidad).save()
+    assert "cantidad" in e.value.error_dict
+    assert Movimiento.objects.count() == 0
+
+
+def test_costo_unitario_con_exceso_de_precision_rechazado(producto, usuario):
+    m = mov(producto, usuario, "entrada", "1")
+    m.costo_unitario = Decimal("1.005")
+    with pytest.raises(ValidationError) as e:
+        m.save()
+    assert "costo_unitario" in e.value.error_dict
+    m.costo_unitario = Decimal("123456789012.345")
+    with pytest.raises(ValidationError) as e:
+        m.save()
+    assert "costo_unitario" in e.value.error_dict
+
+
+def test_cantidad_valida_se_acepta_sin_redondear(producto, usuario):
+    m = mov(producto, usuario, "entrada", "1.25")
+    m.costo_unitario = Decimal("10.50")
+    m.save()
+    m.refresh_from_db()
+    assert m.cantidad == Decimal("1.25")
+    assert m.costo_unitario == Decimal("10.50")
+    mov(producto, usuario, "entrada", "9999999999.99").save()
+
+
+def test_cantidad_fuera_de_rango_rechazada_por_la_base(producto, usuario):
+    with pytest.raises(IntegrityError) as e, transaction.atomic():
+        Movimiento.objects.bulk_create([mov(producto, usuario, "entrada", "99999999999999.99")])
+    _constraint(e, "movimiento_cantidad_en_rango")
+    with pytest.raises(IntegrityError) as e, transaction.atomic():
+        Movimiento.objects.bulk_create([mov(producto, usuario, "salida", "-10000000000")])
+    _constraint(e, "movimiento_cantidad_en_rango")
+
+
+# 5. bulk_create sin upsert ni ignorar conflictos
+def test_bulk_create_rechaza_update_conflicts(producto, usuario):
+    m = mov(producto, usuario, "entrada", "5")
+    m.save()
+    otro = mov(producto, usuario, "entrada", "77")
+    otro.pk = m.pk
+    with pytest.raises(MovimientoInmutable):
+        Movimiento.objects.bulk_create(
+            [otro], update_conflicts=True, update_fields=["cantidad"], unique_fields=["id"]
+        )
+    assert Movimiento.objects.get(pk=m.pk).cantidad == Decimal("5.00")
+
+
+def test_bulk_create_rechaza_ignore_conflicts(producto, usuario):
+    m = mov(producto, usuario, "entrada", "5")
+    m.save()
+    otro = mov(producto, usuario, "entrada", "77")
+    otro.pk = m.pk
+    with pytest.raises(MovimientoInmutable):
+        Movimiento.objects.bulk_create([otro], ignore_conflicts=True)
+    assert Movimiento.objects.count() == 1
+
+
+# 6. carga cruda (loaddata / deserialize)
+def test_carga_cruda_sobre_pk_existente_rechazada(producto, usuario):
+    m = mov(producto, usuario, "entrada", "5")
+    m.save()
+    datos = serializers.serialize("json", [m])
+    modificado = datos.replace('"cantidad": "5"', '"cantidad": "99"')
+    assert modificado != datos
+    with pytest.raises(MovimientoInmutable):
+        for obj in serializers.deserialize("json", modificado):
+            obj.save()
+    assert Movimiento.objects.get(pk=m.pk).cantidad == Decimal("5.00")
+
+
+def test_carga_cruda_de_pk_nuevo_se_permite(producto, usuario):
+    m = mov(producto, usuario, "entrada", "5")
+    m.save()
+    datos = serializers.serialize("json", [m])
+    Movimiento.objects.all()._raw_delete(Movimiento.objects.db)  # solo para preparar el escenario
+    for obj in serializers.deserialize("json", datos):
+        obj.save()
+    assert Movimiento.objects.get(pk=m.pk).cantidad == Decimal("5.00")
+
+
+# 7. base manager inmutable
+def test_base_manager_es_inmutable(producto, usuario):
+    m = mov(producto, usuario, "entrada", "5")
+    m.save()
+    with pytest.raises(MovimientoInmutable):
+        Movimiento._base_manager.update(cantidad=Decimal("1"))
+    with pytest.raises(MovimientoInmutable):
+        Movimiento._base_manager.all().delete()
+    assert Movimiento.objects.get(pk=m.pk).cantidad == Decimal("5.00")
+
+
+# 9. factura con proveedor
+def test_factura_sin_proveedor_rechazada_por_la_base():
+    with pytest.raises(IntegrityError) as e, transaction.atomic():
+        Documento.objects.create(tipo="factura", numero="1")
+    _constraint(e, "documento_factura_con_proveedor")
+    Documento.objects.create(tipo="venta", numero="1")  # otros tipos no la exigen
+
+
+def test_factura_sin_proveedor_rechazada_por_validacion():
+    with pytest.raises(ValidationError) as e:
+        Documento(tipo="factura", numero="1").full_clean()
+    assert "Una factura debe tener proveedor." in str(e.value)
+
+
+# 11. motivo vacio tras Trim
+def test_ajuste_con_motivo_de_espacios_rechazado_por_la_base(producto, usuario):
+    with pytest.raises(IntegrityError) as e, transaction.atomic():
+        Movimiento.objects.bulk_create([mov(producto, usuario, "ajuste", "3", "   ")])
+    _constraint(e, "movimiento_ajuste_con_motivo")
+
+
+def test_ajuste_con_motivo_de_espacios_rechazado_por_save(producto, usuario):
+    with pytest.raises(ValidationError) as e:
+        mov(producto, usuario, "ajuste", "3", " \n\t ").save()
+    assert "motivo" in e.value.error_dict
+
+
+def test_ajuste_positivo_con_motivo_aceptado(producto, usuario):
+    mov(producto, usuario, "ajuste", "3", "sobrante en conteo").save()
+    assert Movimiento.objects.get().cantidad == Decimal("3.00")
+
+
+# Admin de solo lectura
+def test_admin_movimiento_es_solo_lectura(usuario):
+    su = get_user_model().objects.create_superuser("jefe", password="x-prueba-123")
+    request = RequestFactory().get("/admin/")
+    request.user = su
+    ma = MovimientoAdmin(Movimiento, django_admin.site)
+    assert ma.has_add_permission(request) is False
+    assert ma.has_change_permission(request) is False
+    assert ma.has_change_permission(request, obj=object()) is False
+    assert ma.has_delete_permission(request) is False
+    assert ma.has_delete_permission(request, obj=object()) is False
+    assert "delete_selected" not in ma.get_actions(request)
+
+
+# PROTECT en el resto de las relaciones
+def test_borrar_categoria_con_productos_rechazado():
+    c = Categoria.objects.create(nombre="Aceites")
+    Producto.objects.create(sku="C-1", nombre="x", categoria=c)
+    with pytest.raises(ProtectedError):
+        c.delete()
+
+
+def test_borrar_proveedor_con_codigos_o_documentos_rechazado(producto, prov_a):
+    ProductoProveedor.objects.create(producto=producto, proveedor=prov_a, codigo_proveedor="Z")
+    with pytest.raises(ProtectedError):
+        prov_a.delete()
+    prov = Proveedor.objects.create(nombre="Con documento")
+    Documento.objects.create(tipo="factura", proveedor=prov, numero="1")
+    with pytest.raises(ProtectedError):
+        prov.delete()
+
+
+def test_borrar_producto_con_codigo_alternativo_rechazado(producto):
+    CodigoAlternativo.objects.create(producto=producto, tipo="barras", valor="123")
+    with pytest.raises(ProtectedError):
+        producto.delete()
+
+
+# ValidationError identifica la restriccion que falla
+def test_validation_error_nombra_la_restriccion_o_el_campo(prov_a):
+    with pytest.raises(ValidationError) as e:
+        Documento(tipo="venta", descuento_global=Decimal("101")).full_clean()
+    assert "El descuento global debe estar entre 0 y 100." in str(e.value)
+    with pytest.raises(ValidationError) as e:
+        Documento(tipo="factura", proveedor=prov_a, numero="9").full_clean()
+        Documento.objects.create(tipo="factura", proveedor=prov_a, numero="9")
+        Documento(tipo="factura", proveedor=prov_a, numero="9").full_clean()
+    assert "Esa factura ya fue registrada" in str(e.value)

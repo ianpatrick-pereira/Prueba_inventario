@@ -11,16 +11,33 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import models
-from django.db.models import Q
+from django.db.models import Q, Value
+from django.db.models.functions import Trim
+from django.db.models.lookups import Exact
+from django.db.models.signals import pre_save
+from django.dispatch import receiver
 from django.utils import timezone
+
+# Precision de los campos numericos. Cambiarla aqui cambia el campo, la validacion
+# de Movimiento.save() y el CHECK de rango de la base de datos a la vez.
+CANTIDAD_MAX_DIGITS = 12
+CANTIDAD_DECIMAL_PLACES = 2
+MONTO_MAX_DIGITS = 14
+MONTO_DECIMAL_PLACES = 2
+# La cantidad debe ser estrictamente menor (en valor absoluto) que este limite.
+CANTIDAD_LIMITE = Decimal(10) ** (CANTIDAD_MAX_DIGITS - CANTIDAD_DECIMAL_PLACES)
 
 
 def _cantidad(**kw):
-    return models.DecimalField(max_digits=12, decimal_places=2, **kw)
+    return models.DecimalField(
+        max_digits=CANTIDAD_MAX_DIGITS, decimal_places=CANTIDAD_DECIMAL_PLACES, **kw
+    )
 
 
 def _monto(**kw):
-    return models.DecimalField(max_digits=14, decimal_places=2, **kw)
+    return models.DecimalField(
+        max_digits=MONTO_MAX_DIGITS, decimal_places=MONTO_DECIMAL_PLACES, **kw
+    )
 
 
 class Categoria(models.Model):
@@ -122,6 +139,10 @@ class ProductoProveedor(models.Model):
         return f"{self.proveedor} / {self.codigo_proveedor} -> {self.producto}"
 
 
+TIPOS_DOCUMENTO = ["factura", "venta", "conteo", "inventario_inicial", "ajuste"]
+TIPOS_MOVIMIENTO = ["entrada", "salida", "ajuste"]
+
+
 class Documento(models.Model):
     FACTURA = "factura"
     VENTA = "venta"
@@ -154,6 +175,16 @@ class Documento(models.Model):
         verbose_name_plural = "documentos"
         ordering = ["-fecha", "-id"]
         constraints = [
+            models.CheckConstraint(
+                condition=Q(tipo__in=TIPOS_DOCUMENTO),
+                name="documento_tipo_valido",
+                violation_error_message="Tipo de documento no válido.",
+            ),
+            models.CheckConstraint(
+                condition=~Q(tipo="factura") | Q(proveedor__isnull=False),
+                name="documento_factura_con_proveedor",
+                violation_error_message="Una factura debe tener proveedor.",
+            ),
             models.CheckConstraint(
                 condition=Q(descuento_global__gte=0) & Q(descuento_global__lte=100),
                 name="documento_descuento_0_100",
@@ -195,6 +226,18 @@ class MovimientoQuerySet(models.QuerySet):
     def bulk_update(self, *args, **kwargs):
         raise MovimientoInmutable(MENSAJE_INMUTABLE)
 
+    def bulk_create(
+        self, objs, batch_size=None, ignore_conflicts=False, update_conflicts=False,
+        update_fields=None, unique_fields=None,
+    ):
+        # Solo se permite insertar filas nuevas: "upsert" e "ignorar conflictos"
+        # actualizarian o descartarian movimientos existentes en silencio.
+        if update_conflicts or ignore_conflicts:
+            raise MovimientoInmutable(MENSAJE_INMUTABLE)
+        return super().bulk_create(
+            objs, batch_size=batch_size, update_fields=update_fields, unique_fields=unique_fields,
+        )
+
 
 class Movimiento(models.Model):
     """Una fila del kardex. Nunca se modifica ni se borra: un error se corrige
@@ -224,7 +267,19 @@ class Movimiento(models.Model):
         verbose_name = "movimiento"
         verbose_name_plural = "movimientos"
         ordering = ["-fecha", "-id"]
+        # Django usa el base manager en operaciones internas: que sea el manager inmutable.
+        base_manager_name = "objects"
         constraints = [
+            models.CheckConstraint(
+                condition=Q(tipo__in=TIPOS_MOVIMIENTO),
+                name="movimiento_tipo_valido",
+                violation_error_message="Tipo de movimiento no válido.",
+            ),
+            models.CheckConstraint(
+                condition=Q(cantidad__gt=-CANTIDAD_LIMITE) & Q(cantidad__lt=CANTIDAD_LIMITE),
+                name="movimiento_cantidad_en_rango",
+                violation_error_message="La cantidad está fuera del rango permitido.",
+            ),
             models.CheckConstraint(
                 condition=~Q(tipo="entrada") | Q(cantidad__gt=0),
                 name="movimiento_entrada_positiva",
@@ -236,7 +291,8 @@ class Movimiento(models.Model):
                 violation_error_message="Una salida debe tener cantidad menor que cero.",
             ),
             models.CheckConstraint(
-                condition=~Q(tipo="ajuste") | (~Q(cantidad=0) & ~Q(motivo="")),
+                condition=~Q(tipo="ajuste")
+                | (~Q(cantidad=0) & ~Q(Exact(Trim("motivo"), Value("")))),
                 name="movimiento_ajuste_con_motivo",
                 violation_error_message="Un ajuste necesita cantidad distinta de cero y un motivo.",
             ),
@@ -248,13 +304,55 @@ class Movimiento(models.Model):
         if self.tipo == self.AJUSTE and not (self.motivo or "").strip():
             raise ValidationError({"motivo": "Un ajuste necesita un motivo."})
 
+    def _validar_decimales(self):
+        """Rechaza (sin redondear) valores con mas decimales o digitos que el campo."""
+        errores = {}
+        for nombre in ("cantidad", "costo_unitario"):
+            valor = getattr(self, nombre)
+            if valor is None:
+                continue
+            campo = self._meta.get_field(nombre)
+            try:
+                dec = Decimal(repr(valor)) if isinstance(valor, float) else Decimal(str(valor))
+            except Exception:
+                errores[nombre] = "Valor numérico no válido."
+                continue
+            if not dec.is_finite():
+                errores[nombre] = "Valor numérico no válido."
+                continue
+            paso = Decimal(1).scaleb(-campo.decimal_places)
+            if dec != dec.quantize(paso):
+                errores[nombre] = (
+                    f"Admite como máximo {campo.decimal_places} decimales."
+                )
+                continue
+            if abs(dec) >= Decimal(10) ** (campo.max_digits - campo.decimal_places):
+                errores[nombre] = (
+                    f"Admite como máximo {campo.max_digits} dígitos en total "
+                    f"({campo.decimal_places} decimales)."
+                )
+        if errores:
+            raise ValidationError(errores)
+
     def save(self, *args, **kwargs):
-        if not self._state.adding:
+        if args or not self._state.adding or kwargs.get("force_update") or kwargs.get("update_fields"):
             raise MovimientoInmutable(MENSAJE_INMUTABLE)
-        super().save(*args, **kwargs)
+        self._validar_decimales()
+        if self.tipo == self.AJUSTE and not (self.motivo or "").strip():
+            raise ValidationError({"motivo": "Un ajuste necesita un motivo."})
+        # Siempre INSERT: un pk ya existente falla en vez de convertirse en UPDATE.
+        kwargs["force_insert"] = True
+        super().save(**kwargs)
 
     def delete(self, *args, **kwargs):
         raise MovimientoInmutable(MENSAJE_INMUTABLE)
 
     def __str__(self):
         return f"{self.get_tipo_display()} {self.cantidad} de {self.producto_id} ({self.fecha:%Y-%m-%d})"
+
+
+@receiver(pre_save, sender=Movimiento)
+def _rechazar_carga_cruda_sobre_existente(sender, instance, raw=False, **kwargs):
+    """loaddata/deserialize guardan con raw=True y podrian sobrescribir un movimiento."""
+    if raw and instance.pk is not None and Movimiento.objects.filter(pk=instance.pk).exists():
+        raise MovimientoInmutable(MENSAJE_INMUTABLE)
