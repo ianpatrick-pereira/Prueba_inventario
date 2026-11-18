@@ -6,7 +6,7 @@ Pensado para cualquier negocio que maneje volumen de inventario; el primer caso 
 
 ## Estado
 
-Fase 1 en curso: existe el proyecto Django base (configuración segura y ruta de salud). Todavía no hay funciones de inventario.
+Fase 1 en curso: existe el proyecto Django base (configuración segura y ruta de salud) y los modelos del inventario (app `inventario`, visibles en /admin/). Todavía no hay pantallas de negocio.
 
 ## Documentación
 
