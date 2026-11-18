@@ -4,6 +4,7 @@ Referencias para retomar el trabajo en cualquier conversación.
 
 - Documentación del proyecto (fuente única): https://claude.ai/artifact/28juXgBFq7uMuewNM81MzZ
 - Guía personal de programación: https://claude.ai/artifact/SoMeTjncNrbhwa34Mt6GWo
+- Repositorio de código (privado): https://github.com/ianpatrick-pereira/prueba_inventario
 - Bosquejo navegable: https://claude.ai/artifact/S3Fcwhg3nAeMKrqvFWud32 (archivo: /home/user/inventario/bosquejo.html)
 
 ## Contexto clave (al 18-11-2026)
