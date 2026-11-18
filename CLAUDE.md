@@ -34,9 +34,10 @@ Nunca se presenta una simulación como algo real: el bosquejo y los datos de eje
 | Rol | Quién | Responsable de | No puede |
 | --- | --- | --- | --- |
 | Responsable humano | Tú | Decidir, aprobar riesgo ALTO y CRÍTICO, probar con datos reales, entregar archivos de Eleventa y fotos de facturas | Delegar la aprobación final en la IA |
-| Orquestador | Claude, sesión principal | Entender lo pedido, dividir en tareas, delegar, consolidar y mantener la documentación y la guía (D-06, D-12) | Marcar algo validado sin evidencia; editar código fuera de una tarea |
+| Orquestador | Claude, sesión principal | Entender lo pedido, dividir en tareas, conectar al programador y al documentador, armar el paquete de traspaso y verificar el trabajo de ambos (D-22) | Marcar algo validado sin evidencia; programar o documentar por su cuenta |
 | Arquitecto | Claude (Opus) | Modelo de datos, integración con Eleventa, decisiones técnicas | Cambiar la arquitectura sin una decisión registrada |
-| Ejecutor | Subagente (Sonnet) | Implementar una tarea con contrato | Ampliar el alcance o tocar archivos ajenos a la tarea |
+| Programador (ejecutor) | Subagente (Sonnet) | Escribir el código, las pruebas y la documentación dentro del repositorio de una tarea con contrato; entregar un informe técnico | Ampliar el alcance, tocar archivos ajenos a la tarea o escribir en la documentación del proyecto o la guía |
+| Documentador | Subagente (Sonnet) | Actualizar la documentación del proyecto y la guía personal con el paquete de traspaso del orquestador | Escribir código, tomar decisiones o registrar algo que no venga en el paquete |
 | Auditor | Subagente distinto del ejecutor | Revisar código y seguridad e informar hallazgos con gravedad | Corregir lo que audita |
 | Auxiliar | Subagente (Haiku) | Inspeccionar archivos exportados, contar, clasificar, buscar | Tomar decisiones o resolver ambigüedades |
 | Componente IA del sistema | API de IA que lee facturas | Extraer las líneas de una foto | Escribir en la base de datos: su salida es un dato no confiable |
@@ -46,7 +47,7 @@ Nunca se presenta una simulación como algo real: el bosquejo y los datos de eje
 | Modelo | Uso en este proyecto |
 | --- | --- |
 | Haiku | Inspeccionar la exportación de tickets, contar filas, buscar en el código |
-| Sonnet | Implementar modelos, pantallas, importadores y pruebas |
+| Sonnet | Programador: modelos, pantallas, importadores y pruebas. Documentador: documentación del proyecto y guía personal |
 | Opus | Arquitectura, integración con Eleventa, auditoría de stock y seguridad, decisiones como A/B/C |
 
 El riesgo pesa más que la dificultad: una tarea simple que toca el cálculo de stock, un importador o la seguridad recibe la revisión de un nivel superior. En esta sesión sí se pueden lanzar subagentes eligiendo modelo; si en otro entorno no se puede, se informa sin simularlo.
@@ -55,7 +56,7 @@ El riesgo pesa más que la dificultad: una tarea simple que toca el cálculo de 
 
 Antes de delegar se responden los 8 pasos del original: objetivo, dominio, complejidad y riesgo, dependencias, especialista, alcance y permisos, criterios de aceptación y forma de validar. Reglas propias del proyecto:
 
-- **Fase 0 (actual, solo documentación): no se delega.** La sesión principal trabaja directo.
+- **Fase 0 (actual): no se delega código.** Desde D-22, la documentación sí se delega al documentador.
 - Desde la fase 1, se delega solo una tarea con contrato completo e independiente de las demás.
 - No se delegan cambios pequeños en archivos que la sesión principal ya tiene en contexto.
 - Un solo ejecutor por archivo a la vez.
@@ -88,7 +89,7 @@ Si falta un dato crítico, se pregunta antes de actuar.
 - Cambios mínimos dentro del alcance; nada de reorganizar código ajeno.
 - Respaldo de la base de datos antes de aplicar una migración sobre datos reales.
 - Toda tecnología nueva requiere una fila en Decisiones.
-- Cada cambio actualiza la documentación del proyecto y la guía personal (D-06, D-12).
+- Solo el documentador escribe en la documentación del proyecto y en la guía personal (D-06, D-12, D-22). Trabaja con un paquete de traspaso del orquestador: qué cambió, qué se decidió, qué pestañas tocar y el informe de la tarea. El orquestador verifica el resultado. El programador documenta solo dentro del repositorio; el auditor y el auxiliar no documentan.
 - Bitácora y Decisiones nunca se borran: solo se agregan filas.
 
 ## 7. Seguridad transversal

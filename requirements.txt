@@ -1,0 +1,5 @@
+Django==5.2.19
+python-dotenv==1.2.4
+# Dependencias transitivas de Django, fijadas
+asgiref==3.13.0
+sqlparse==0.6.1
