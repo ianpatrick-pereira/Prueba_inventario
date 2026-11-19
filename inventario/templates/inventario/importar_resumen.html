@@ -11,6 +11,7 @@
       <tr><th>Unidades cargadas</th><td class="num">{{ r.unidades_cargadas|cl }}</td></tr>
       <tr><th>Existentes actualizados</th><td class="num">{{ r.actualizados }}</td></tr>
       <tr><th>Filas con error (no importadas)</th><td class="num">{{ r.con_error }}</td></tr>
+      <tr><th>Filas omitidas (totales)</th><td class="num">{{ r.omitidas|length }}</td></tr>
     </table>
     {% if imp.documento %}
       <p>Documento de inventario inicial: {% if user.is_staff %}<a href="{% url 'admin:inventario_documento_change' imp.documento.pk %}">{{ imp.documento }}</a>{% else %}{{ imp.documento }}{% endif %}</p>

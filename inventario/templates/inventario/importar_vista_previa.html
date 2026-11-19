@@ -12,8 +12,11 @@
       <tr><th>Filas con advertencia</th><td class="num">{{ resumen.con_advertencia }}</td></tr>
       <tr><th>Filas con error (no se importan)</th><td class="num">{{ resumen.con_error }}</td></tr>
       <tr><th>Unidades totales a cargar</th><td class="num">{{ resumen.unidades|cl }}</td></tr>
+      <tr><th>Filas omitidas (totales)</th><td class="num">{{ resumen.omitidas }}</td></tr>
     </table>
   </div>
+  {% if omitidas %}<div class="tarjeta"><strong>Filas omitidas por ser totales:</strong>
+    {% for o in omitidas %}fila {{ o.fila }} («{{ o.texto }}»){% if not forloop.last %}, {% endif %}{% endfor %}</div>{% endif %}
   <form method="post" class="tarjeta">
     {% csrf_token %}
     <input type="hidden" name="token" value="{{ token }}">

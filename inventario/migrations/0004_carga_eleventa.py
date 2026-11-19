@@ -68,6 +68,10 @@ class Migration(migrations.Migration):
                     "resumen",
                     models.JSONField(blank=True, default=dict, verbose_name="resumen"),
                 ),
+                (
+                    "analisis",
+                    models.JSONField(blank=True, default=dict, verbose_name="análisis del archivo"),
+                ),
             ],
             options={
                 "verbose_name": "importación desde Eleventa",

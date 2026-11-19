@@ -491,7 +491,8 @@ class ImportarSubir(_ImportarBase, View):
             previa.archivo.delete(save=False)
             previa.delete()
         nombre = (request.FILES["archivo"].name or "archivo").replace("\\", "/").rsplit("/", 1)[-1][:255]
-        imp = ImportacionEleventa(usuario=request.user, hash_sha256=huella, nombre_original=nombre)
+        imp = ImportacionEleventa(usuario=request.user, hash_sha256=huella, nombre_original=nombre,
+                                  analisis=form.analisis.a_json())
         imp.archivo.save(nombre, ContentFile(contenido), save=False)
         try:
             imp.save()
@@ -516,18 +517,19 @@ class ImportarVistaPrevia(_ImportarBase, View):
             messages.info(request, "Esa importación fue descartada.")
             return redirect("importar_eleventa")
         try:
-            filas = importar_eleventa.analizar(imp)
+            filas = importar_eleventa.cargar_analisis(imp)
         except importar_eleventa.ArchivoInvalido as e:
             messages.error(request, " ".join(e.messages))
             return redirect("importar_eleventa")
         pagina = _Paginator(filas, 100).get_page(request.GET.get("page"))
         return render(request, self.template_name, {
             "imp": imp, "resumen": importar_eleventa.resumir(filas), "pagina": pagina,
+            "omitidas": filas.omitidas,
             "token": tokens.emitir(request, f"importar:{pk}"),
         })
 
     def post(self, request, pk):
-        imp = self._cargar(pk)
+        self._cargar(pk)  # 404 si no existe
         accion = request.POST.get("accion")
         if not tokens.consumir(request, request.POST.get("token", ""), f"importar:{pk}"):
             messages.warning(

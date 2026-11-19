@@ -475,6 +475,9 @@ class ImportacionEleventa(models.Model):
     fecha = models.DateTimeField("fecha", default=timezone.now)
     estado = models.CharField("estado", max_length=20, choices=ESTADOS, default=VISTA_PREVIA)
     resumen = models.JSONField("resumen", default=dict, blank=True)
+    # Resultado de leer el archivo al subirlo (filas, advertencias, errores): la vista previa
+    # se pagina con esto sin volver a leer el archivo. La confirmacion vuelve a leerlo.
+    analisis = models.JSONField("análisis del archivo", default=dict, blank=True)
     documento = models.ForeignKey(
         Documento, verbose_name="documento", on_delete=models.PROTECT, null=True, blank=True
     )

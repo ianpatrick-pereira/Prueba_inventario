@@ -60,7 +60,7 @@ def xlsx(filas, encabezados=ENCABEZADOS, titulo=("REPORTE DE INVENTARIO (fictici
         ws.append(f)
     if totales:
         ws.append([])
-        ws.append(["Totales", None, None, None, None, 99])
+        ws.append([None, "Totales", None, None, None, 99])
     b = io.BytesIO()
     wb.save(b)
     return b.getvalue()
@@ -69,13 +69,13 @@ def xlsx(filas, encabezados=ENCABEZADOS, titulo=("REPORTE DE INVENTARIO (fictici
 def csv_bytes(filas, sep=";", codec="utf-8", encabezados=ENCABEZADOS):
     lineas = ["REPORTE FICTICIO", ""] + [sep.join(encabezados)] + [
         sep.join("" if c is None else (f'"{c}"' if sep in str(c) else str(c)) for c in f) for f in filas
-    ] + ["", sep.join(["Totales", "", "", "", "", "99"])]
+    ] + ["", sep.join(["", "Totales", "", "", "", "99"])]
     return "\n".join(lineas).encode(codec)
 
 
 FILAS = [
     ["0077", "Filtro de aceite", "$1.234", "2500", "2000", 10, 2, "Filtros"],
-    ["A100", "Aceite 10W40", "1.234,50", "$5.990", "5.500", "5", "1", "Aceites"],
+    ["A100", "Aceite 10W40", "1.234,50", "$5.990,00", "5.500,00", "5", "1", "Aceites"],
     ["B200", "Bujía", 800, 1500, 1200, 0, 0, "filtros "],
 ]
 
@@ -147,19 +147,36 @@ def test_xlsx_toma_la_hoja_que_tiene_los_encabezados():
 
 
 # ------------------------------------------------------------------ 2. numeros
-@pytest.mark.parametrize("entrada,esperado", [
-    ("$1.234", D("1234")), ("1.234,50", D("1234.50")), ("1234.5", D("1234.5")), (1234, D("1234")),
-    ("$ 12.345.678", D("12345678")), ("12,5", D("12.5")), ("0,5", D("0.5")), ("1,234.56", D("1234.56")),
-    (D("7.25"), D("7.25")), (1234.5, D("1234.5")), ("-5", D("-5")), ("  42 ", D("42")),
+@pytest.mark.parametrize("entrada,modo,esperado", [
+    ("$1.234", "coma", D("1234")), ("1.234,50", None, D("1234.50")), ("1234.5", None, D("1234.5")),
+    (1234, None, D("1234")), ("$ 12.345.678", None, D("12345678")), ("12,5", None, D("12.5")),
+    ("0,5", None, D("0.5")), ("1,234.56", None, D("1234.56")), (D("7.25"), None, D("7.25")),
+    (1234.5, None, D("1234.5")), ("-5", None, D("-5")), ("  42 ", None, D("42")),
+    ("0.500", None, D("0.5")), ("0.500", "coma", D("0.5")), (".5", None, D("0.5")), ("2.75", None, D("2.75")),
+    ("1.005", "coma", D("1005")), ("1.005", "punto", D("1.005")),
+    ("1,234", "punto", D("1234")), ("1,234", "coma", D("1.234")),
+    ("1,234,567", "punto", D("1234567")), ("1.234.567", "coma", D("1234567")), ("1.234.567", None, D("1234567")),
 ])
-def test_parsear_decimal(entrada, esperado):
-    r = imp.parsear_decimal(entrada)
+def test_parsear_decimal(entrada, modo, esperado):
+    r = imp.parsear_decimal(entrada, modo)
     assert r == esperado and isinstance(r, Decimal)
 
 
-@pytest.mark.parametrize("malo", ["abc", "", "  ", None, True, "1.2.3,4,5", "12a", float("nan"), float("inf")])
-def test_parsear_decimal_invalido(malo):
-    assert imp.parsear_decimal(malo) is None
+@pytest.mark.parametrize("texto,modo", [
+    ("1.500", None), ("1.005", None), ("1,234", None), ("1,234,567", None), ("1,234,567", "coma"),
+    ("1.234.567", "punto"), ("$1.234", None),
+])
+def test_parsear_decimal_ambiguo_es_error_nunca_conversion_silenciosa(texto, modo):
+    assert imp.parsear_decimal(texto, modo) is imp.AMBIGUO
+
+
+@pytest.mark.parametrize("columna,modo", [
+    (["1,5", "2.000"], "coma"), (["1.234,50"], "coma"), (["2,5"], "coma"), (["2.75"], "punto"),
+    (["0.500"], "punto"), (["1,234,567"], None), (["1,234,567", "2.75"], "punto"), (["1,234.5"], "punto"), (["1.500", "2.000"], None),
+    (["1,5", "2.75"], None), ([], None), (["10", "20"], None),
+])
+def test_detectar_modo_por_columna(columna, modo):
+    assert imp.detectar_modo(columna) == modo
 
 
 def test_decimal_de_float_no_arrastra_error_binario():
@@ -184,12 +201,47 @@ def test_codigo_texto_con_ceros_en_csv_se_conserva():
 
 
 # ------------------------------------------------------------------ 4. saneo y formulas
-@pytest.mark.parametrize("peligroso,limpio", [("=SUMA(A1)", "SUMA(A1)"), ("+cmd", "cmd"), ("-cmd", "cmd"),
-                                              ("@cmd", "cmd"), ("  =HYPERLINK(\"x\")", "HYPERLINK(\"x\")")])
-def test_celdas_de_texto_que_empiezan_con_simbolo_peligroso_se_sanean(peligroso, limpio):
+@pytest.mark.parametrize("peligroso", ["=SUMA(A1)", "+56 9", "-123", "@SUM", "-20% dto."])
+def test_descripcion_y_departamento_se_guardan_tal_cual_con_advertencia(peligroso):
     f = imp.analizar_contenido(csv_bytes([["X1", peligroso, 1, 1, 1, 1, 0, peligroso]]), "x.csv")[0]
-    assert f.descripcion == limpio and f.departamento == limpio
-    assert any("peligroso" in a for a in f.advertencias)
+    assert f.descripcion == peligroso and f.departamento == peligroso and f.valida
+    assert sum("se guarda igual" in a for a in f.advertencias) == 2
+
+
+@pytest.mark.parametrize("codigo", ["-123", "+56 9", "@SUM", "=1+1", "  -9"])
+def test_codigo_que_empieza_con_simbolo_es_error_y_no_se_altera(codigo):
+    f = imp.analizar_contenido(csv_bytes([[codigo, "Algo", 1, 1, 1, 1, 0, ""]]), "x.csv")[0]
+    assert f.codigo == codigo.strip() and not f.valida and f.errores[0].startswith("Código con símbolo inicial")
+
+
+def test_codigo_booleano_de_xlsx_es_error():
+    f = imp.analizar_contenido(xlsx([[True, "Verdadero", 1, 1, 1, 1, 0, ""]]), "x.xlsx")[0]
+    assert not f.valida and "valor lógico" in f.errores[0]
+
+
+def test_codigo_conserva_espacios_internos_y_solo_se_recorta():
+    f = imp.analizar_contenido(csv_bytes([["  AB  12 ", "Doble espacio", 1, 1, 1, 1, 0, ""]]), "x.csv")[0]
+    assert f.codigo == "AB  12" and f.valida
+
+
+@pytest.mark.parametrize("actualizar", [False, True])
+def test_codigo_con_menos_no_pisa_al_codigo_existente(adm, actualizar):
+    p = Producto.objects.create(sku="123", nombre="Original", costo=D("5"))
+    i = preparar(adm, xlsx([["-123", "Intento de pisar", 99, 99, 99, 50, 0, "Dep"]]))
+    r = adm.get(reverse("importar_vista_previa", args=[i.pk]))
+    assert r.context["resumen"]["con_error"] == 1
+    confirmar_http(adm, i, actualizar=actualizar)
+    p.refresh_from_db()
+    assert p.nombre == "Original" and p.costo == D("5") and Movimiento.objects.count() == 0
+    assert Producto.objects.count() == 1 and not Categoria.objects.exists()
+    assert ImportacionEleventa.objects.get().resumen["errores"][0]["codigo"] == "-123"
+
+
+def test_neutralizar_para_planilla():
+    from inventario.validadores import neutralizar_para_planilla as n
+
+    assert n("=SUMA(A1)") == "'=SUMA(A1)" and n("+1") == "'+1" and n("-x") == "'-x" and n("@a") == "'@a"
+    assert n("\tTAB") == "'\tTAB" and n("normal") == "normal" and n("") == "" and n(None) == "" and n(12) == "12"
 
 
 def test_formula_en_xlsx_no_se_evalua():
@@ -206,7 +258,7 @@ def test_formula_en_xlsx_no_se_evalua():
     f1, f2 = imp.analizar_contenido(b.getvalue(), "x.xlsx")
     assert f1.descripcion == "" and "Descripción vacía." in f1.errores   # la formula no se calculo a "2"
     assert f1.inventario is None                                       # tampoco "=2+2" -> 4
-    assert f2.descripcion == "2+2" and any("peligroso" in a for a in f2.advertencias)
+    assert f2.descripcion == "=2+2" and any("se guarda igual" in a for a in f2.advertencias)  # texto, sin evaluar
 
 
 def test_el_codigo_no_ejecuta_nada_con_data_only(monkeypatch):
@@ -386,36 +438,40 @@ def test_sin_stock_no_se_crea_documento(adm):
     assert Producto.objects.count() == 1 and not Documento.objects.exists()
 
 
-def test_no_usa_permitir_negativo(adm, monkeypatch):
+def test_no_usa_ajustes_uno_a_uno_ni_permitir_negativo(adm, monkeypatch):
     llamadas = []
-    real = servicios.registrar_ajuste
+    real = servicios.registrar_inventario_inicial_en_lote
 
     def espia(*a, **k):
-        llamadas.append(k)
+        llamadas.append((a, k))
         return real(*a, **k)
 
-    monkeypatch.setattr(servicios, "registrar_ajuste", espia)
+    def prohibido(*a, **k):
+        raise AssertionError("no debe usar registrar_ajuste uno a uno")
+
+    monkeypatch.setattr(servicios, "registrar_inventario_inicial_en_lote", espia)
+    monkeypatch.setattr(servicios, "registrar_ajuste", prohibido)
     confirmar_http(adm, preparar(adm))
-    assert llamadas and all(not k.get("permitir_negativo") for k in llamadas)
+    assert len(llamadas) == 1 and not any("permitir_negativo" in k for _, k in llamadas)
 
 
 # ------------------------------------------------------------------ 8. todo o nada
 def test_un_fallo_a_mitad_no_deja_nada(adm, monkeypatch):
     i = preparar(adm)
-    real = servicios.registrar_ajuste
-    n = {"c": 0}
+    real = servicios.registrar_inventario_inicial_en_lote
+    visto = {}
 
-    def falla_en_el_segundo(*a, **k):
-        n["c"] += 1
-        if n["c"] == 2:
-            raise RuntimeError("fallo simulado")
-        return real(*a, **k)
+    def escribe_y_falla(*a, **k):
+        movs = real(*a, **k)                         # los movimientos SI se escribieron...
+        visto["movimientos"] = Movimiento.objects.count()
+        visto["productos"] = Producto.objects.count()
+        raise RuntimeError("fallo simulado")         # ...y luego algo falla
 
-    monkeypatch.setattr(servicios, "registrar_ajuste", falla_en_el_segundo)
+    monkeypatch.setattr(servicios, "registrar_inventario_inicial_en_lote", escribe_y_falla)
     adm.raise_request_exception = False
     r = confirmar_http(adm, i)
-    assert r.status_code == 500 or r.status_code == 302
-    assert n["c"] == 2                                          # llego a escribir el primero
+    assert r.status_code == 500
+    assert visto == {"movimientos": 2, "productos": 3}           # habia escrito de todo
     assert Producto.objects.count() == 0 and Categoria.objects.count() == 0
     assert Documento.objects.count() == 0 and Movimiento.objects.count() == 0
     i.refresh_from_db()
@@ -608,3 +664,177 @@ def test_media_esta_fuera_de_git():
 def test_requirements_fija_openpyxl_y_et_xmlfile():
     t = open("requirements.txt").read()
     assert "openpyxl==3.1.5" in t and re.search(r"^et_xmlfile==\d", t, re.M)
+
+
+# ------------------------------------------------------------------ D-50: separador decimal por columna
+def _costos(valores):
+    filas = [[f"C{i}", f"Cosa {i}", v, 1, 1, 1, 0, ""] for i, v in enumerate(valores)]
+    return imp.analizar_contenido(csv_bytes(filas), "x.csv")
+
+
+def test_columna_con_evidencia_de_coma_decimal_lee_el_punto_como_miles():
+    filas = _costos(["1.500", "2,5", "1.234,50"])
+    assert [f.costo for f in filas] == [D("1500"), D("2.5"), D("1234.5")] and all(f.valida for f in filas)
+
+
+def test_columna_con_evidencia_de_punto_decimal_lee_el_punto_como_decimal():
+    filas = _costos(["1.005", "2.75", "0.500"])
+    assert [f.costo for f in filas] == [D("1.01"), D("2.75"), D("0.50")] and all(f.valida for f in filas)
+    assert any("redondeado" in a for a in filas[0].advertencias)
+
+
+def test_valor_ambiguo_sin_evidencia_es_error_de_fila_en_esa_columna():
+    f1, f2 = _costos(["1.500", "2000"])
+    assert not f1.valida and "ambiguo" in f1.errores[0] and "Precio costo" in f1.errores[0]
+    assert f2.valida and f2.costo == D("2000")
+
+
+def test_cero_punto_quinientos_nunca_es_miles():
+    assert _costos(["0.500"])[0].costo == D("0.50")
+
+
+def test_coma_de_miles_solo_si_la_columna_lo_indica():
+    asi = _costos(["1,234,567", "2.75"])
+    assert asi[0].costo == D("1234567") and asi[0].valida
+    sin = _costos(["1,234,567", "10"])[0]
+    assert not sin.valida and "ambiguo" in sin.errores[0]
+    conmilcoma = _costos(["1,234", "2.75"])[0]
+    assert conmilcoma.costo == D("1234")
+    con_coma_decimal = _costos(["1,234", "2,5"])[0]
+    assert con_coma_decimal.costo == D("1.23") and any("redondeado" in a for a in con_coma_decimal.advertencias)
+
+
+def test_inventario_ambiguo_es_error_y_numeros_nativos_de_xlsx_no_cambian():
+    f = imp.analizar_contenido(csv_bytes([["I1", "x", 1, 1, 1, "1.500", 0, ""]]), "x.csv")[0]
+    assert not f.valida and "Inventario: valor ambiguo" in f.errores[0]
+    nativos = imp.analizar_contenido(xlsx([["I2", "x", 1500, 1, 1, 1500, 0, ""], ["I3", "y", 1.5, 1, 1, 0.5, 0, ""]]), "x.xlsx")
+    assert [f.valida for f in nativos] == [True, True]
+    assert nativos[0].costo == D("1500") and nativos[1].costo == D("1.5") and nativos[1].inventario == D("0.5")
+
+
+def test_vista_previa_muestra_el_error_de_ambiguedad_y_no_importa_la_fila(adm):
+    i = preparar(adm, xlsx([["OK", "Bien", "2,5", 1, 1, 1, 0, ""], ["AMB", "Ambigua", 1, 1, 1, "1.500", 0, ""]]))
+    t = adm.get(reverse("importar_vista_previa", args=[i.pk])).content.decode()
+    assert "valor ambiguo" in t
+    confirmar_http(adm, i)
+    assert list(Producto.objects.values_list("sku", flat=True)) == ["OK"]
+
+
+# ------------------------------------------------------------------ A3: filas de totales
+def test_fila_de_totales_solo_si_el_codigo_esta_vacio_y_empieza_con_total():
+    filas = [["TOTAL5W30", "Aceite sintetico", 1, 1, 1, 1, 0, ""], ["Total", "Producto raro", 1, 1, 1, 1, 0, ""],
+             ["", "Total general", None, None, None, 99, None, ""], ["", "Sin total aqui", 1, 1, 1, 1, 0, ""]]
+    a = imp.analizar_contenido(xlsx(filas, totales=False), "x.xlsx")
+    assert [f.codigo for f in a] == ["TOTAL5W30", "Total", ""]          # el 3.o es un error de codigo vacio
+    assert [o["texto"] for o in a.omitidas] == ["Total general"] and a.omitidas[0]["fila"] == 7
+    assert a[2].errores == ["Código vacío."]
+
+
+def test_vista_previa_muestra_las_filas_omitidas_con_su_numero(adm):
+    i = preparar(adm, xlsx(FILAS))
+    r = adm.get(reverse("importar_vista_previa", args=[i.pk]))
+    assert r.context["resumen"]["omitidas"] == 1 and r.context["resumen"]["vacias"] == 1
+    assert r.context["omitidas"][0]["texto"] == "Totales"
+    n = r.context["omitidas"][0]["fila"]
+    assert f"fila {n} (" in r.content.decode()
+
+
+def test_codigos_total_se_importan(adm):
+    i = preparar(adm, xlsx([["TOTAL5W30", "Aceite", 1, 1, 1, 2, 0, ""], ["Total", "Otro", 1, 1, 1, 0, 0, ""]], totales=False))
+    confirmar_http(adm, i)
+    assert sorted(Producto.objects.values_list("sku", flat=True)) == ["TOTAL5W30", "Total"]
+
+
+# ------------------------------------------------------------------ M1: csv.Error
+def test_csv_con_campo_enorme_es_archivo_invalido_no_500(adm):
+    grande = (";".join(ENCABEZADOS) + "\nA;" + "x" * 200000 + ";1;1;1;1;0;D\n").encode()
+    with pytest.raises(imp.ArchivoInvalido):
+        imp.analizar_contenido(grande, "x.csv")
+    r = subir(adm, grande, "enorme.csv")
+    assert r.status_code == 200 and "mal formado" in r.content.decode()
+    assert ImportacionEleventa.objects.count() == 0
+
+
+# ------------------------------------------------------------------ M3: analisis guardado, hash al confirmar
+def test_el_analisis_se_guarda_al_subir_y_la_vista_previa_no_relee_el_archivo(adm, monkeypatch):
+    i = preparar(adm)
+    assert i.analisis["filas"] and len(i.analisis["filas"]) == 3 and i.analisis["omitidas"]
+    monkeypatch.setattr(imp, "_leer", lambda *_: pytest.fail("la vista previa no debe releer el archivo"))
+    r = adm.get(reverse("importar_vista_previa", args=[i.pk]))
+    assert r.status_code == 200 and r.context["resumen"]["filas"] == 3
+    assert [f.codigo for f in r.context["pagina"]] == ["0077", "A100", "B200"]
+
+
+def test_la_vista_previa_con_analisis_guardado_refleja_el_estado_actual_de_la_base(adm):
+    i = preparar(adm)
+    Producto.objects.create(sku="A100", nombre="Aparecio despues")
+    r = adm.get(reverse("importar_vista_previa", args=[i.pk]))
+    assert r.context["resumen"]["existentes"] == 1 and r.context["resumen"]["nuevas"] == 2
+
+
+def test_la_confirmacion_vuelve_a_leer_el_archivo_y_compara_el_hash(adm):
+    i = preparar(adm)
+    with open(i.archivo.path, "ab") as f:
+        f.write(b"manipulado")
+    r = confirmar_http(adm, i)
+    assert r.status_code == 302 and r.url == reverse("importar_vista_previa", args=[i.pk])
+    assert Producto.objects.count() == 0
+    assert "no coincide" in adm.get(r.url).content.decode()
+
+
+def test_la_confirmacion_usa_el_archivo_y_no_el_analisis_guardado(adm):
+    i = preparar(adm)
+    i.analisis = {"filas": [], "omitidas": [], "vacias": 0}      # un analisis guardado adulterado no importa
+    i.save()
+    confirmar_http(adm, i)
+    assert Producto.objects.count() == 3
+
+
+def test_limite_descomprimido_es_de_50_mb():
+    assert imp.MAX_DESCOMPRIMIDO == 50 * 1024 * 1024
+
+
+# ------------------------------------------------------------------ M2: rendimiento de la confirmacion (D-51)
+def _archivo_grande(n):
+    filas = [[f"P{i:05d}", f"Producto ficticio {i}", "1.250,50", "2.500,00", "2.000,00", i % 7 + 1, 2, f"Dep{i % 20}"]
+             for i in range(n)]
+    return xlsx(filas)
+
+
+def _medir_confirmacion(admin_user, n):
+    from django.test.utils import CaptureQueriesContext
+    import time
+
+    contenido = _archivo_grande(n)
+    c = Client()
+    c.force_login(admin_user)
+    r = c.post(reverse("importar_eleventa"), {"archivo": SimpleUploadedFile(f"g{n}.xlsx", contenido)})
+    i = ImportacionEleventa.objects.get(pk=int(r.url.strip("/").split("/")[-1]))
+    t0 = time.perf_counter()
+    with CaptureQueriesContext(connection) as q:
+        resumen = imp.confirmar(i.pk, admin_user)
+    return len(q), time.perf_counter() - t0, resumen
+
+
+def test_confirmacion_de_5000_filas_es_rapida_y_con_consultas_acotadas(admin_user, capsys):
+    q50, t50, r50 = _medir_confirmacion(admin_user, 50)
+    ImportacionEleventa.objects.all().delete()  # el archivo distinto de 5.000 filas es otra importacion
+    q5000, t5000, r5000 = _medir_confirmacion(admin_user, 5000)
+    with capsys.disabled():
+        print(f"\n[M2] confirmar 50 filas: {q50} consultas, {t50:.2f}s; 5.000 filas: {q5000} consultas, {t5000:.2f}s")
+    assert r5000["creados"] == 5000 - 50 and r5000["existentes"] == 50       # las 50 primeras ya existian
+    lotes = -(-5000 // 500)
+    assert q5000 <= q50 + 14 * lotes              # solo crece por lotes de 500 (no por fila)
+    assert q5000 < 150
+    assert t5000 < 5
+    assert Movimiento.objects.count() == 50 + (5000 - 50)  # 50 del primer lote + el resto nuevo
+    assert servicios.stock_de(Producto.objects.get(sku="P00003")) == D("4.00")
+
+
+def test_la_vista_previa_de_5000_filas_pagina_y_no_relee(adm):
+    i = preparar(adm, _archivo_grande(5000))
+    import time
+
+    t0 = time.perf_counter()
+    r = adm.get(reverse("importar_vista_previa", args=[i.pk]), {"page": 50})
+    assert r.status_code == 200 and len(r.context["pagina"]) == 100 and time.perf_counter() - t0 < 5

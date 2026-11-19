@@ -238,7 +238,7 @@ class SubirEleventaForm(forms.Form):
             raise forms.ValidationError("El archivo supera el máximo de 5 MB.")
         contenido = f.read(_imp.MAX_BYTES + 1)
         try:
-            _imp.validar_subida(f.name, contenido)
+            self.analisis = _imp.validar_subida(f.name, contenido)
         except _imp.ArchivoInvalido as e:
             raise forms.ValidationError(e.messages)
         self.contenido = contenido
