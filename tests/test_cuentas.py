@@ -191,7 +191,7 @@ def test_login_con_token_csrf_funciona():
 def test_plantilla_de_login_incluye_csrf_y_no_carga_js_externo(client):
     html = client.get("/cuentas/login/").content.decode()
     assert "csrfmiddlewaretoken" in html
-    assert all('src="/static/js/sistema.js"' in x for x in re.findall(r"<script[^>]*>", html)) and "http://" not in html and "https://" not in html
+    assert all('src="/static/js/sistema.js?v=' in x for x in re.findall(r"<script[^>]*>", html)) and "http://" not in html and "https://" not in html
 
 
 def test_inicio_muestra_usuario_y_perfil(client):
