@@ -6,6 +6,7 @@ Reglas clave:
   en Eleventa existen códigos como «0077» que un número destruiría.
 - Los movimientos son inmutables: un error se corrige con un movimiento inverso.
 """
+import uuid
 from datetime import timedelta
 from decimal import Decimal
 
@@ -85,6 +86,8 @@ class Producto(models.Model):
     )
     unidad = models.CharField("unidad", max_length=30, default="unidad")
     costo = _monto(verbose_name="costo de referencia", default=Decimal("0"))
+    precio_venta = _monto(verbose_name="precio de venta", default=Decimal("0"))
+    precio_mayoreo = _monto(verbose_name="precio mayoreo", default=Decimal("0"))
     stock_min = _cantidad(verbose_name="stock mínimo", default=Decimal("0"))
     stock_max = _cantidad(verbose_name="stock máximo", default=Decimal("0"))
 
@@ -93,6 +96,26 @@ class Producto(models.Model):
         verbose_name_plural = "productos"
         ordering = ["nombre"]
         constraints = [
+            models.CheckConstraint(
+                condition=Q(costo__gte=0), name="producto_costo_no_negativo",
+                violation_error_message="El costo no puede ser negativo.",
+            ),
+            models.CheckConstraint(
+                condition=Q(precio_venta__gte=0), name="producto_precio_venta_no_negativo",
+                violation_error_message="El precio de venta no puede ser negativo.",
+            ),
+            models.CheckConstraint(
+                condition=Q(precio_mayoreo__gte=0), name="producto_precio_mayoreo_no_negativo",
+                violation_error_message="El precio mayoreo no puede ser negativo.",
+            ),
+            models.CheckConstraint(
+                condition=Q(stock_min__gte=0), name="producto_stock_min_no_negativo",
+                violation_error_message="El stock mínimo no puede ser negativo.",
+            ),
+            models.CheckConstraint(
+                condition=Q(stock_max__gte=0), name="producto_stock_max_no_negativo",
+                violation_error_message="El stock máximo no puede ser negativo.",
+            ),
             models.CheckConstraint(
                 condition=Q(stock_max__gte=models.F("stock_min")),
                 name="producto_stock_max_gte_min",
@@ -426,3 +449,41 @@ def _proteger_movimiento_en_pre_save(sender, instance, raw=False, using=None, **
     if instance.pk is not None and Movimiento.objects.using(using).filter(pk=instance.pk).exists():
         raise MovimientoInmutable(MENSAJE_INMUTABLE)
     instance.validar_datos()
+
+
+def ruta_importacion(instance, filename):
+    """El archivo subido se guarda con nombre aleatorio: el nombre original nunca va en la ruta."""
+    extension = ".csv" if str(filename).lower().endswith(".csv") else ".xlsx"
+    return f"importaciones/{uuid.uuid4().hex}{extension}"
+
+
+class ImportacionEleventa(models.Model):
+    """Una carga inicial del catalogo desde la exportacion de inventario de Eleventa (T-F1-08).
+    El archivo es un dato del negocio: vive en media/ (fuera de Git)."""
+
+    VISTA_PREVIA = "vista_previa"
+    CONFIRMADA = "confirmada"
+    DESCARTADA = "descartada"
+    ESTADOS = [(VISTA_PREVIA, "Vista previa"), (CONFIRMADA, "Confirmada"), (DESCARTADA, "Descartada")]
+
+    archivo = models.FileField("archivo", upload_to=ruta_importacion)
+    hash_sha256 = models.CharField("hash SHA-256", max_length=64, unique=True)
+    nombre_original = models.CharField("nombre original", max_length=255)
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, verbose_name="usuario", on_delete=models.PROTECT
+    )
+    fecha = models.DateTimeField("fecha", default=timezone.now)
+    estado = models.CharField("estado", max_length=20, choices=ESTADOS, default=VISTA_PREVIA)
+    resumen = models.JSONField("resumen", default=dict, blank=True)
+    documento = models.ForeignKey(
+        Documento, verbose_name="documento", on_delete=models.PROTECT, null=True, blank=True
+    )
+
+    class Meta:
+        verbose_name = "importación desde Eleventa"
+        verbose_name_plural = "importaciones desde Eleventa"
+        ordering = ["-fecha", "-id"]
+        permissions = [("importar_eleventa", "Puede importar la carga inicial desde Eleventa")]
+
+    def __str__(self):
+        return f"Importación {self.pk} ({self.get_estado_display()})"

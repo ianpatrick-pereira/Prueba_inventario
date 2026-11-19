@@ -23,7 +23,7 @@ CLAVE = "Zq7-mPx2vL-prueba"
 MODELOS = ["categoria", "proveedor", "producto", "codigoalternativo", "productoproveedor",
            "documento", "movimiento"]
 PERSONALIZADOS = {"registrar_entrada", "registrar_salida", "registrar_ajuste", "revertir_movimiento",
-                  "permitir_stock_negativo"}
+                  "permitir_stock_negativo", "importar_eleventa"}
 # Escrita a mano, independiente de la migracion (D-38).
 OPERADOR = (
     {f"view_{m}" for m in MODELOS}
@@ -31,7 +31,9 @@ OPERADOR = (
        for a in ("add", "change")}
     | {"add_documento", "registrar_entrada", "registrar_salida"}
 )
-ADMINISTRADOR = {f"{a}_{m}" for m in MODELOS for a in ("add", "change", "delete", "view")} | PERSONALIZADOS
+# 8 modelos x 4 + 6 personalizados = 38.
+ADMINISTRADOR = ({f"{a}_{m}" for m in MODELOS + ["importacioneleventa"] for a in ("add", "change", "delete", "view")}
+                 | PERSONALIZADOS)
 
 
 def codenames(grupo):
@@ -60,7 +62,8 @@ def test_los_grupos_existen_con_exactamente_los_permisos_de_d38():
 
 def test_tamanos_de_la_matriz_d38_y_d40():
     assert len(OPERADOR) == 20 and len(codenames("Operador")) == 20
-    assert len(ADMINISTRADOR) == 33 and len(codenames("Administrador")) == 33
+    assert len(ADMINISTRADOR) == 38 and len(codenames("Administrador")) == 38  # 33 + 5 nuevos (4 del modelo + importar_eleventa)
+    assert "importar_eleventa" in codenames("Administrador") and "importar_eleventa" not in codenames("Operador")
     assert "permitir_stock_negativo" in codenames("Administrador")
     assert "permitir_stock_negativo" not in codenames("Operador")
 

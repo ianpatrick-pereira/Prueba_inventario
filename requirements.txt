@@ -3,3 +3,6 @@ python-dotenv==1.2.4
 # Dependencias transitivas de Django, fijadas
 asgiref==3.13.0
 sqlparse==0.6.1
+# Lectura de archivos .xlsx de la carga inicial desde Eleventa (D-46). Solo lectura, sin evaluar fórmulas.
+openpyxl==3.1.5
+et_xmlfile==2.0.0

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% load formato %}
+{% block titulo %}Vista previa - Sistema de inventario{% endblock %}
+{% block contenido %}
+  <h1>Vista previa de la carga inicial</h1>
+  <p>Archivo: <strong>{{ imp.nombre_original }}</strong></p>
+  <div class="tarjeta">
+    <table>
+      <tr><th>Filas leídas</th><td class="num">{{ resumen.filas }}</td></tr>
+      <tr><th>Productos nuevos</th><td class="num">{{ resumen.nuevas }}</td></tr>
+      <tr><th>Productos que ya existen</th><td class="num">{{ resumen.existentes }}</td></tr>
+      <tr><th>Filas con advertencia</th><td class="num">{{ resumen.con_advertencia }}</td></tr>
+      <tr><th>Filas con error (no se importan)</th><td class="num">{{ resumen.con_error }}</td></tr>
+      <tr><th>Unidades totales a cargar</th><td class="num">{{ resumen.unidades|cl }}</td></tr>
+    </table>
+  </div>
+  <form method="post" class="tarjeta">
+    {% csrf_token %}
+    <input type="hidden" name="token" value="{{ token }}">
+    <label><input type="checkbox" name="actualizar_existentes"> Actualizar datos de productos existentes (nombre, costo, precios y mínimo; nunca el stock)</label>
+    <p>
+      <button type="submit" name="accion" value="confirmar">Confirmar importación</button>
+      <button type="submit" name="accion" value="descartar" class="peligro">Descartar</button>
+    </p>
+    <p class="ayuda">Los productos nuevos con inventario mayor que cero se cargan como un ajuste de «Inventario inicial desde Eleventa». El stock de los productos que ya existen no se toca.</p>
+  </form>
+  <table>
+    <thead><tr><th>Fila</th><th>Código</th><th>Descripción</th><th class="num">Inventario</th><th class="num">Costo</th><th>Estado</th><th>Mensajes</th></tr></thead>
+    <tbody>
+    {% for f in pagina %}
+      <tr{% if f.estado == "error" %} class="bajo"{% endif %}>
+        <td>{{ f.numero }}</td><td>{{ f.codigo|default:"-" }}</td><td>{{ f.descripcion|default:"-" }}</td>
+        <td class="num">{% if f.inventario is None %}-{% else %}{{ f.inventario|cl }}{% endif %}</td>
+        <td class="num">{{ f.costo|cl }}</td>
+        <td>{% if f.estado == "nueva" %}Nueva{% elif f.estado == "existente" %}Existente{% else %}<span class="etiqueta-bajo">Error</span>{% endif %}</td>
+        <td>
+          {% for m in f.errores %}<div class="error">{{ m }}</div>{% endfor %}
+          {% for m in f.advertencias %}<div class="ayuda">{{ m }}</div>{% endfor %}
+          {% if f.diferencia is not None %}<div class="ayuda">Sistema: {{ f.stock_sistema|cl }}; archivo: {{ f.inventario|cl }}; diferencia {{ f.diferencia|cl }} (no se modifica).</div>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if pagina.has_other_pages %}
+  <div class="paginas">
+    {% if pagina.has_previous %}<a href="?page={{ pagina.previous_page_number }}">Anterior</a>{% endif %}
+    <span>Página {{ pagina.number }} de {{ pagina.paginator.num_pages }}</span>
+    {% if pagina.has_next %}<a href="?page={{ pagina.next_page_number }}">Siguiente</a>{% endif %}
+  </div>
+  {% endif %}
+{% endblock %}

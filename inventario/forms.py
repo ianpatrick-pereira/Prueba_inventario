@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django import forms
 
 from .models import Categoria, CodigoAlternativo, Producto, ProductoProveedor, Proveedor
@@ -49,6 +51,16 @@ class ProveedorForm(_NombreUnicoMixin, forms.ModelForm):
 
 
 class _ProductoBaseForm(forms.ModelForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Los precios son opcionales: vacio = 0.
+        for campo in ("precio_venta", "precio_mayoreo"):
+            self.fields[campo].required = False
+
+    def _vacio_es_cero(self, campo):
+        v = self.cleaned_data.get(campo)
+        return Decimal("0") if v is None else v
+
     def _no_negativo(self, campo):
         valor = self.cleaned_data.get(campo)
         if valor is not None and valor < 0:
@@ -57,6 +69,14 @@ class _ProductoBaseForm(forms.ModelForm):
 
     def clean_costo(self):
         return self._no_negativo("costo")
+
+    def clean_precio_venta(self):
+        self.cleaned_data["precio_venta"] = self._vacio_es_cero("precio_venta")
+        return self._no_negativo("precio_venta")
+
+    def clean_precio_mayoreo(self):
+        self.cleaned_data["precio_mayoreo"] = self._vacio_es_cero("precio_mayoreo")
+        return self._no_negativo("precio_mayoreo")
 
     def clean_stock_min(self):
         return self._no_negativo("stock_min")
@@ -79,7 +99,8 @@ class _ProductoBaseForm(forms.ModelForm):
         return nombre
 
 
-_CAMPOS_COMUNES = ["nombre", "categoria", "unidad", "costo", "stock_min", "stock_max"]
+_CAMPOS_COMUNES = ["nombre", "categoria", "unidad", "costo", "precio_venta", "precio_mayoreo",
+                   "stock_min", "stock_max"]
 
 
 class ProductoCrearForm(_ProductoBaseForm):
@@ -202,3 +223,23 @@ class ConteoForm(_MovimientoForm):
 
 class ReversaForm(_MovimientoForm):
     motivo = forms.CharField(label="Motivo (obligatorio)", max_length=500)
+
+
+# ---------------------------------------------------------------- importacion desde Eleventa (T-F1-08)
+from . import importar_eleventa as _imp  # noqa: E402
+
+
+class SubirEleventaForm(forms.Form):
+    archivo = forms.FileField(label="Archivo exportado de Eleventa (.xlsx o .csv, máximo 5 MB)")
+
+    def clean_archivo(self):
+        f = self.cleaned_data["archivo"]
+        if f.size > _imp.MAX_BYTES:
+            raise forms.ValidationError("El archivo supera el máximo de 5 MB.")
+        contenido = f.read(_imp.MAX_BYTES + 1)
+        try:
+            _imp.validar_subida(f.name, contenido)
+        except _imp.ArchivoInvalido as e:
+            raise forms.ValidationError(e.messages)
+        self.contenido = contenido
+        return f
