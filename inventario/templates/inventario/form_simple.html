@@ -2,20 +2,16 @@
 {% block titulo %}{{ titulo }} - Sistema de inventario{% endblock %}
 {% block contenido %}
   <div class="cabecera-pagina"><h1>{{ titulo }}</h1></div>
-  <form method="post" class="tarjeta form-angosto">
+  <form method="post" class="form-angosto">
     {% csrf_token %}
     {{ form.non_field_errors }}
-    {% for campo in form %}
-      <div class="campo{% if campo.errors %} con-error{% endif %}">
-        <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
-        {{ campo }}
-        {% if campo.help_text %}<div class="ayuda">{{ campo.help_text }}</div>{% endif %}
-        {{ campo.errors }}
-      </div>
-    {% endfor %}
+    <section class="tarjeta seccion">
+      <h2>{{ seccion|default:"Datos" }}</h2>
+      {% for campo in form %}{% include "inventario/_campo.html" with campo=campo %}{% endfor %}
+    </section>
     <div class="acciones">
-      <button type="submit">Guardar</button>
-      <a class="boton secundario" href="{{ volver }}">Cancelar</a>
+      <button type="submit" class="grande">Guardar</button>
+      <a class="boton secundario grande" href="{{ volver }}">Cancelar</a>
     </div>
   </form>
 {% endblock %}

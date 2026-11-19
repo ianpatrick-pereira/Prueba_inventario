@@ -16,20 +16,30 @@
   <div class="tarjeta form-angosto">
     <div class="etiqueta-cifra">Stock actual</div>
     <div class="cifra">{{ stock|cl }} <span class="ayuda">{{ producto.unidad }}</span></div>
+    {% barra_stock stock producto.stock_min producto.stock_max %}
   </div>
-  <form method="post" class="tarjeta form-angosto">
+  <form method="post" class="form-angosto">
     {% csrf_token %}
     {{ form.token }}
     {{ form.non_field_errors }}
-    {% for campo in form.visible_fields %}
-      <div class="campo{% if campo.errors %} con-error{% endif %}">
-        <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
-        {{ campo }}
-        {{ campo.errors }}
-      </div>
-    {% endfor %}
-    {% if ayuda %}<p class="ayuda">{{ ayuda }}</p>{% endif %}
-    <p class="ayuda">La fecha y hora del movimiento son siempre las de ahora.</p>
+    <section class="tarjeta seccion">
+      <h2>{% if form.costo_unitario %}Mercadería{% else %}Cantidad{% endif %}</h2>
+      {% include "inventario/_campo.html" with campo=form.cantidad sufijo=producto.unidad %}
+      {% if form.costo_unitario %}{% include "inventario/_campo.html" with campo=form.costo_unitario prefijo="$" %}{% endif %}
+    </section>
+    {% if form.proveedor %}
+    <section class="tarjeta seccion">
+      <h2>Origen</h2>
+      {% include "inventario/_campo.html" with campo=form.proveedor %}
+      {% include "inventario/_campo.html" with campo=form.numero %}
+    </section>
+    {% endif %}
+    <section class="tarjeta seccion">
+      <h2>Detalle</h2>
+      {% include "inventario/_campo.html" with campo=form.motivo %}
+      {% if ayuda %}<p class="ayuda">{{ ayuda }}</p>{% endif %}
+      <p class="ayuda">La fecha y hora del movimiento son siempre las de ahora.</p>
+    </section>
     <div class="acciones">
       <button type="submit" class="grande">Guardar</button>
       <a class="boton secundario grande" href="{% url 'kardex' producto.pk %}">Cancelar</a>

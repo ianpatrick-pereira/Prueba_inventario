@@ -10,7 +10,7 @@ from django.contrib.auth.mixins import PermissionRequiredMixin
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
-from django.db.models import Case, Count, IntegerField, Q, Sum, Value, When
+from django.db.models import Case, Count, F, IntegerField, Q, Sum, Value, When
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.urls import reverse, reverse_lazy
@@ -18,6 +18,7 @@ from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
 from . import servicios, tokens
+from .calculos import calcular_margen
 from .forms import (
     CategoriaForm,
     CodigoAlternativoForm,
@@ -58,6 +59,12 @@ class ProductoLista(Permiso, ListView):
     context_object_name = "productos"
     paginate_by = 50
 
+    def _bajo_minimo(self):
+        return self.request.GET.get("bajo_minimo") == "1"
+
+    def get_paginate_by(self, queryset):
+        return 500 if self._bajo_minimo() else self.paginate_by     # la hoja impresa va en una sola lista
+
     def _filtro_categoria(self):
         """Lee ?categoria=<pk>|ninguna. Un valor invalido o inexistente no da error: avisa y no filtra."""
         if hasattr(self, "_cat"):
@@ -83,6 +90,8 @@ class ProductoLista(Permiso, ListView):
             qs = qs.filter(categoria__isnull=True)
         elif cat is not None:
             qs = qs.filter(categoria_id=cat)
+        if self._bajo_minimo():                 # mismo criterio de la marca «bajo minimo» de la lista
+            qs = qs.filter(stock_min__gt=0, stock__lte=F("stock_min"))
         if not q:
             return qs.order_by("nombre", "pk")
         # Subconsultas (no joins): un producto nunca sale repetido ni altera su stock.
@@ -105,12 +114,24 @@ class ProductoLista(Permiso, ListView):
         ctx = super().get_context_data(**kwargs)
         q = normalizar_codigo(self.request.GET.get("q"))
         cat = self._filtro_categoria()
+        bajo = self._bajo_minimo()
+        base = {k: v for k, v in (("q", q), ("bajo_minimo", "1" if bajo else "")) if v}
+
+        def enlace(**extra):
+            datos = {**base, **extra}
+            return "?" + urlencode(datos) if datos else reverse("producto_lista")
+
+        chips = [{"texto": "Todas", "href": enlace(), "activo": cat is None},
+                 {"texto": "Sin categoría", "href": enlace(categoria="ninguna"), "activo": cat == "ninguna"}]
+        chips += [{"texto": c.nombre, "href": enlace(categoria=c.pk), "activo": cat == c.pk} for c in self.categorias]
         ctx.update({
             "q": q, "categorias": self.categorias, "categoria_sel": "ninguna" if cat == "ninguna" else (cat or ""),
-            "aviso_categoria": self.aviso_categoria,
+            "aviso_categoria": self.aviso_categoria, "chips": chips, "bajo_minimo": bajo,
+            "categoria_param": "" if cat is None else cat,
             # los enlaces de pagina conservan la busqueda y la categoria
             "volver_param": urlencode({"volver": self.request.GET.urlencode()}) if self.request.GET else "",
-            "filtros_qs": urlencode({k: v for k, v in (("q", q), ("categoria", "" if cat is None else cat)) if v != ""}),
+            "filtros_qs": urlencode({k: v for k, v in (("q", q), ("categoria", "" if cat is None else cat),
+                                                       ("bajo_minimo", "1" if bajo else "")) if v != ""}),
         })
         return ctx
 
@@ -176,6 +197,7 @@ class ProductoDetalle(Permiso, DetailView):
         # o si se acaba de agregar/quitar un codigo de ella (?abrir=alternativos|proveedores).
         abrir = self.request.GET.get("abrir")
         ctx.update(_volver_a_la_lista(self.request))
+        ctx["margen"] = calcular_margen(p.precio_venta, p.costo)
         ctx["abrir_alternativos"] = self.form_codigo is not None or abrir == "alternativos"
         ctx["abrir_proveedores"] = self.form_proveedor is not None or abrir == "proveedores"
         return ctx

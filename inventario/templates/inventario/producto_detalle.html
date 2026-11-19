@@ -21,6 +21,7 @@
       <div class="etiqueta-cifra">Stock actual</div>
       <div class="cifra{% if producto.stock_min > 0 and stock <= producto.stock_min %} alerta{% endif %}">{{ stock|cl }} <span class="ayuda">{{ producto.unidad }}</span></div>
       {% if producto.stock_min > 0 and stock <= producto.stock_min %}<p><span class="insignia insignia-bajo">(en o bajo el mínimo)</span></p>{% endif %}
+      <div class="barra-grande">{% barra_stock stock producto.stock_min producto.stock_max %}</div>
       {% if perms.inventario.view_movimiento %}<p><a class="boton grande" href="{% url 'kardex' producto.pk %}{% if volver_param %}?{{ volver_param }}{% endif %}">Ver kardex</a></p>{% endif %}
       <dl class="datos">
         <div class="dato"><dt>Stock mínimo</dt><dd>{{ producto.stock_min|cl }}</dd></div>
@@ -33,6 +34,7 @@
         <div class="dato"><dt>Costo de referencia</dt><dd>{{ producto.costo|pesos }}</dd></div>
         <div class="dato"><dt>Precio de venta</dt><dd>{{ producto.precio_venta|pesos }}</dd></div>
         <div class="dato"><dt>Precio mayoreo</dt><dd>{{ producto.precio_mayoreo|pesos }}</dd></div>
+        <div class="dato"><dt>Margen</dt><dd>{% if margen.estado == "normal" %}{{ margen.pct }} %{% elif margen.estado == "bajo_costo" %}{% if margen.pct is not None %}{{ margen.pct }} % {% endif %}<span class="insignia insignia-error">bajo costo</span>{% else %}<span class="insignia insignia-aviso">sin costo</span>{% endif %}</dd></div>
       </dl>
     </div>
   </div>

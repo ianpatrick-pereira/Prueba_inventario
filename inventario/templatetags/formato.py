@@ -63,3 +63,28 @@ def formatear_cantidad(valor):
 @register.filter(name="cantidad")
 def cantidad(valor):
     return formatear_cantidad(valor)
+
+
+@register.inclusion_tag("inventario/_barra_stock.html")
+def barra_stock(stock, minimo, maximo):
+    """Barra de stock entre 0 y el maximo, con marca del minimo (no se dibuja sin maximo util)."""
+    from ..calculos import calcular_barra_stock
+
+    datos = calcular_barra_stock(stock, minimo, maximo)
+    if datos is None:
+        return {"dibujar": False}
+    datos.update({
+        "dibujar": True,
+        "texto": f"{formatear_cantidad(stock)} de {formatear_cantidad(maximo)}, mínimo {formatear_cantidad(minimo)}",
+    })
+    return datos
+
+
+@register.filter(name="sugerida")
+def sugerida(producto):
+    """Cantidad sugerida a reponer = maximo - stock, solo si es mayor que cero (hoja impresa)."""
+    try:
+        diferencia = Decimal(str(producto.stock_max)) - Decimal(str(producto.stock))
+    except (InvalidOperation, AttributeError, ValueError):
+        return ""
+    return formatear_cantidad(diferencia) if diferencia > 0 else ""

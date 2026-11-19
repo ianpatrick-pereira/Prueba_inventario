@@ -73,6 +73,9 @@
     <a href="?page={{ pagina.paginator.num_pages }}{% if filtro_qs %}&amp;{{ filtro_qs }}{% endif %}">Última</a>{% endif %}
   </nav>
   {% endif %}
-  {% else %}<p class="vacio">No hay movimientos{% if saldo_inicial is not None %} en este período{% endif %}.</p>{% endif %}
+  {% else %}
+  <div class="vacio"><p>No hay movimientos{% if saldo_inicial is not None %} en este período{% endif %}.</p>
+    {% if perms.inventario.registrar_entrada and saldo_inicial is None %}<a class="boton" href="{% url 'entrada' producto.pk %}">Registrar la primera entrada</a>{% endif %}</div>
+  {% endif %}
   </details>
 {% endblock %}

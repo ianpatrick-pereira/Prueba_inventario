@@ -6,23 +6,39 @@
 {% endblock %}
 {% block contenido %}
   <div class="cabecera-pagina"><h1>{% if object %}Editar producto {{ object.sku }}{% else %}Nuevo producto{% endif %}</h1></div>
-  <form method="post" class="tarjeta form-ancho">
+  <form method="post" class="form-ancho">
     {% csrf_token %}
     {{ form.non_field_errors }}
-    <div class="campos-fila">
-    {% for campo in form %}
-      <div class="campo{% if campo.errors %} con-error{% endif %}">
-        <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
-        {{ campo }}
-        {% if campo.help_text %}<div class="ayuda">{{ campo.help_text }}</div>{% endif %}
-        {{ campo.errors }}
+    <section class="tarjeta seccion">
+      <h2>Identificación</h2>
+      <div class="campos-fila dos-columnas">
+        {% if form.sku %}{% include "inventario/_campo.html" with campo=form.sku %}{% else %}
+        <div class="campo"><label>Código</label><div class="valor-fijo mono">{{ object.sku }}</div><div class="ayuda">El código no se cambia desde las pantallas.</div></div>
+        {% endif %}
+        {% include "inventario/_campo.html" with campo=form.nombre %}
+        {% include "inventario/_campo.html" with campo=form.categoria %}
+        {% include "inventario/_campo.html" with campo=form.unidad %}
       </div>
-    {% endfor %}
-    </div>
-    <p class="ayuda">El stock no se edita aquí: cambia solo con movimientos.</p>
+    </section>
+    <section class="tarjeta seccion">
+      <h2>Precios</h2>
+      <div class="campos-fila">
+        {% include "inventario/_campo.html" with campo=form.costo prefijo="$" %}
+        {% include "inventario/_campo.html" with campo=form.precio_venta prefijo="$" %}
+        {% include "inventario/_campo.html" with campo=form.precio_mayoreo prefijo="$" %}
+      </div>
+    </section>
+    <section class="tarjeta seccion">
+      <h2>Stock</h2>
+      <div class="campos-fila">
+        {% include "inventario/_campo.html" with campo=form.stock_min sufijo=form.unidad.value|default:"unidad" sufijo_unidad=True %}
+        {% include "inventario/_campo.html" with campo=form.stock_max sufijo=form.unidad.value|default:"unidad" sufijo_unidad=True %}
+      </div>
+      <p class="ayuda">El stock actual no se edita aquí: cambia solo con movimientos desde el kardex.</p>
+    </section>
     <div class="acciones">
-      <button type="submit">Guardar</button>
-      <a class="boton secundario" href="{% if object %}{% url 'producto_detalle' object.pk %}{% else %}{% url 'producto_lista' %}{% endif %}">Cancelar</a>
+      <button type="submit" class="grande">Guardar</button>
+      <a class="boton secundario grande" href="{% if object %}{% url 'producto_detalle' object.pk %}{% else %}{% url 'producto_lista' %}{% endif %}">Cancelar</a>
     </div>
   </form>
 {% endblock %}

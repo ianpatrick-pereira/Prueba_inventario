@@ -220,7 +220,7 @@ def test_historial_cerrado_sin_parametros_y_con_el_total_correcto(adm, admin_use
     t = html(adm.get(reverse("kardex", args=[prod.pk])))
     assert "Historial de movimientos (7)" in t and " open" not in _details(t) and "<summary>" in t
     assert t.index("Registrar entrada") < t.index("<details")           # botones arriba, historial plegado debajo
-    assert "<script" not in t
+    assert all("sistema.js" in x for x in re.findall(r"<script[^>]*>", t))
 
 
 @pytest.mark.parametrize("params", [{"desde": "2000-01-01"}, {"hasta": "2100-01-01"}, {"page": 1}, {"desde": "basura"}])
@@ -277,4 +277,4 @@ def test_el_operador_tambien_cae_en_el_kardex_al_crear(op, operador):
 def test_menu_marca_productos_en_las_pantallas_de_movimientos(adm, prod):
     for nombre in ("entrada", "salida", "corregir"):
         t = html(adm.get(reverse(nombre, args=[prod.pk])))
-        assert re.search(r'href="/productos/" aria-current="page">Productos', t), nombre
+        assert re.search(r'href="/productos/" aria-current="page">.*?<span>Productos</span>', t), nombre
