@@ -2,7 +2,7 @@
 sin permiso -> 403 y sin sesion -> login (LoginRequiredMiddleware)."""
 import datetime as _dt
 from decimal import Decimal
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode
 
 from django import forms as _forms
 from django.contrib import messages
@@ -109,6 +109,7 @@ class ProductoLista(Permiso, ListView):
             "q": q, "categorias": self.categorias, "categoria_sel": "ninguna" if cat == "ninguna" else (cat or ""),
             "aviso_categoria": self.aviso_categoria,
             # los enlaces de pagina conservan la busqueda y la categoria
+            "volver_param": urlencode({"volver": self.request.GET.urlencode()}) if self.request.GET else "",
             "filtros_qs": urlencode({k: v for k, v in (("q", q), ("categoria", "" if cat is None else cat)) if v != ""}),
         })
         return ctx
@@ -138,6 +139,18 @@ class ProductoEditar(Permiso, MensajeExito, UpdateView):
         return reverse("producto_detalle", args=[self.object.pk])
 
 
+def _volver_a_la_lista(request):
+    """Busqueda/filtro de la lista de la que venimos (?volver=q=..&categoria=..&page=..).
+    Solo se aceptan esas tres claves: el resultado siempre es un enlace interno a /productos/."""
+    pares = [(k, v) for k, v in parse_qsl(request.GET.get("volver", "")[:300]) if k in ("q", "categoria", "page") and v]
+    qs = urlencode(pares)
+    return {
+        "volver": qs,
+        "volver_param": urlencode({"volver": qs}) if qs else "",
+        "enlace_lista": reverse("producto_lista") + (f"?{qs}" if qs else ""),
+    }
+
+
 class ProductoDetalle(Permiso, DetailView):
     permission_required = "inventario.view_producto"
     model = Producto
@@ -159,6 +172,12 @@ class ProductoDetalle(Permiso, DetailView):
             ctx["form_codigo"] = self.form_codigo or CodigoAlternativoForm(producto=p)
         if user.has_perm("inventario.add_productoproveedor"):
             ctx["form_proveedor"] = self.form_proveedor or ProductoProveedorForm(producto=p)
+        # Las secciones plegables se abren solas si su formulario volvio con errores
+        # o si se acaba de agregar/quitar un codigo de ella (?abrir=alternativos|proveedores).
+        abrir = self.request.GET.get("abrir")
+        ctx.update(_volver_a_la_lista(self.request))
+        ctx["abrir_alternativos"] = self.form_codigo is not None or abrir == "alternativos"
+        ctx["abrir_proveedores"] = self.form_proveedor is not None or abrir == "proveedores"
         return ctx
 
 
@@ -167,6 +186,7 @@ class _AgregarCodigo(Permiso, View):
 
     form_class = None
     campo = None
+    seccion = ""
     mensaje = ""
 
     def post(self, request, pk):
@@ -175,7 +195,7 @@ class _AgregarCodigo(Permiso, View):
         if form.is_valid():
             form.save()
             messages.success(request, self.mensaje)
-            return redirect("producto_detalle", pk=pk)
+            return redirect(f"{reverse('producto_detalle', args=[pk])}?abrir={self.seccion}")
         vista = ProductoDetalle()
         vista.setup(request, pk=pk)
         vista.object = producto
@@ -188,6 +208,7 @@ class CodigoAgregar(_AgregarCodigo):
     permission_required = "inventario.add_codigoalternativo"
     form_class = CodigoAlternativoForm
     campo = "codigo"
+    seccion = "alternativos"
     mensaje = "Código agregado."
 
 
@@ -195,6 +216,7 @@ class CodigoProveedorAgregar(_AgregarCodigo):
     permission_required = "inventario.add_productoproveedor"
     form_class = ProductoProveedorForm
     campo = "proveedor"
+    seccion = "proveedores"
     mensaje = "Código de proveedor agregado."
 
 
@@ -202,6 +224,7 @@ class _QuitarCodigo(Permiso, View):
     """GET muestra la confirmacion (no borra nada); POST borra y vuelve al producto."""
 
     model = None
+    seccion = ""
     mensaje = ""
     template_name = "inventario/confirmar_quitar.html"
 
@@ -216,13 +239,14 @@ class _QuitarCodigo(Permiso, View):
         producto_pk = objeto.producto_id
         objeto.delete()
         messages.success(request, self.mensaje)
-        return redirect("producto_detalle", pk=producto_pk)
+        return redirect(f"{reverse('producto_detalle', args=[producto_pk])}?abrir={self.seccion}")
 
 
 class CodigoQuitar(_QuitarCodigo):
     permission_required = "inventario.delete_codigoalternativo"
     model = CodigoAlternativo
     etiqueta = "código alternativo"
+    seccion = "alternativos"
     mensaje = "Código quitado."
 
 
@@ -230,6 +254,7 @@ class CodigoProveedorQuitar(_QuitarCodigo):
     permission_required = "inventario.delete_productoproveedor"
     model = ProductoProveedor
     etiqueta = "código de proveedor"
+    seccion = "proveedores"
     mensaje = "Código de proveedor quitado."
 
 
@@ -368,7 +393,10 @@ class Kardex(Permiso, View):
             })
         abierto = any(request.GET.get(k) for k in ("desde", "hasta", "page"))
         sufijo = "&".join(f"{k}={v}" for k, v in (("desde", desde), ("hasta", hasta)) if v)
-        return render(request, "inventario/kardex.html", {
+        volver = _volver_a_la_lista(request)
+        if volver["volver_param"]:
+            sufijo = f"{sufijo}&{volver['volver_param']}" if sufijo else volver["volver_param"]
+        return render(request, "inventario/kardex.html", {**volver,
             "producto": producto, "stock": servicios.stock_de(producto), "filas": filas,
             "pagina": pagina, "filtro": filtro, "saldo_inicial": saldo_inicial if desde else None,
             "filtro_qs": sufijo, "total": paginador.count, "abierto": abierto,

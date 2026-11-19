@@ -44,14 +44,15 @@ a:hover { text-decoration-thickness: 2px; }
 /* ---------- barra lateral ---------- */
 .lateral {
   width: var(--ancho-lateral); flex: 0 0 var(--ancho-lateral); background: var(--lateral); color: var(--lateral-fg);
-  padding: 22px 0; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  padding: 22px 0; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; overflow-x: hidden;
+  min-width: 0; word-break: normal; overflow-wrap: anywhere;
 }
-.marca { display: block; font-family: var(--font-display); font-weight: 700; font-size: 20px; color: #fff; text-decoration: none; margin: 0 22px 26px; letter-spacing: -.01em; }
+.marca { display: block; font-family: var(--font-display); font-weight: 700; font-size: 20px; color: #fff; text-decoration: none; margin: 0 24px 26px; letter-spacing: -.01em; }
 .lateral nav { display: flex; flex-direction: column; }
-.lateral nav a { display: block; padding: 11px 22px 11px 26px; color: var(--lateral-fg); text-decoration: none; border-left: 4px solid transparent; font-weight: 500; }
+.lateral nav a { display: block; padding: 11px 24px 11px 28px; color: var(--lateral-fg); text-decoration: none; border-left: 4px solid transparent; font-weight: 500; }
 .lateral nav a:hover { background: rgba(255, 255, 255, .07); color: #fff; }
 .lateral nav a[aria-current="page"] { background: var(--lateral-activo); color: var(--lateral-activo-fg); border-left-color: var(--lateral-borde); font-weight: 600; }
-.lateral .usuario { margin-top: auto; padding: var(--s4) 22px 0; border-top: 1px solid rgba(255, 255, 255, .12); font-size: 14px; display: flex; flex-direction: column; gap: var(--s1); }
+.lateral .usuario { margin-top: auto; padding: var(--s4) 24px 0; border-top: 1px solid rgba(255, 255, 255, .12); font-size: 14px; display: flex; flex-direction: column; gap: var(--s1); }
 .lateral .usuario span { color: var(--lateral-fg); }
 .lateral .usuario form { margin: 0; }
 .boton-enlace, .lateral button.boton-enlace { background: none; border: 0; color: #fff; font: inherit; font-weight: 600; cursor: pointer; padding: var(--s1) 0; min-height: 0; text-decoration: underline; justify-content: flex-start; }
@@ -73,6 +74,12 @@ p { margin: 0 0 var(--s3); max-width: 75ch; }
 .error { color: var(--bad); font-weight: 600; }
 .mono { font-family: var(--font-mono); font-size: 13.5px; }
 td.mono a, td.mono { color: var(--accent); }
+
+/* ---------- migas de pan ---------- */
+.migas { font-size: 14px; color: var(--muted); margin-bottom: var(--s3); display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2); align-items: center; }
+.migas a { font-weight: 600; text-decoration: none; }
+.migas a:hover { text-decoration: underline; }
+.migas [aria-current="page"] { color: var(--fg); font-weight: 600; }
 
 /* ---------- botones ---------- */
 .boton, button, input[type=submit] {
@@ -189,6 +196,8 @@ details.historial > summary:hover { background: var(--accent-soft); }
 details.historial > :not(summary) { margin-left: var(--s5); margin-right: var(--s5); }
 details.historial > .tabla-scroll { box-shadow: none; border: 1px solid var(--line); }
 details.historial > .paginas { margin-bottom: var(--s5); }
+details.historial[open] > :last-child { margin-bottom: var(--s5); }
+details.historial[open] > summary { margin-bottom: var(--s3); }
 .filtro-fechas { margin-bottom: var(--s4); }
 
 /* ---------- ingreso y paginas de error (sin barra lateral) ---------- */

@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% block titulo %}{% if object %}Editar producto{% else %}Nuevo producto{% endif %} - Sistema de inventario{% endblock %}
+{% block migas %}
+  <nav class="migas" aria-label="Ruta"><a href="{% url 'producto_lista' %}">← Productos</a> <span aria-hidden="true">›</span>
+    {% if object %}<a href="{% url 'producto_detalle' object.pk %}">{{ object.sku }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Editar</span>{% else %}<span aria-current="page">Nuevo producto</span>{% endif %}</nav>
+{% endblock %}
 {% block contenido %}
   <div class="cabecera-pagina"><h1>{% if object %}Editar producto {{ object.sku }}{% else %}Nuevo producto{% endif %}</h1></div>
   <form method="post" class="tarjeta form-ancho">

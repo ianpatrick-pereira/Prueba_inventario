@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% load formato %}
 {% block titulo %}Kardex {{ producto.sku }} - Sistema de inventario{% endblock %}
+{% block migas %}
+  <nav class="migas" aria-label="Ruta"><a href="{{ enlace_lista }}">← Productos</a> <span aria-hidden="true">›</span>
+    <a href="{% url 'producto_detalle' producto.pk %}{% if volver_param %}?{{ volver_param }}{% endif %}">{{ producto.sku }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Kardex</span></nav>
+{% endblock %}
 {% block contenido %}
   <div class="cabecera-pagina">
     <div>
@@ -23,6 +27,7 @@
   <details class="tarjeta historial"{% if abierto %} open{% endif %}>
     <summary>Historial de movimientos ({{ total }})</summary>
   <form method="get" class="filtro-fechas">
+    {% if volver %}<input type="hidden" name="volver" value="{{ volver }}">{% endif %}
     <div class="campos-fila">
       <div class="campo"><label for="id_desde">Desde</label><input type="date" name="desde" id="id_desde" value="{{ filtro.data.desde }}"></div>
       <div class="campo"><label for="id_hasta">Hasta</label><input type="date" name="hasta" id="id_hasta" value="{{ filtro.data.hasta }}"></div>

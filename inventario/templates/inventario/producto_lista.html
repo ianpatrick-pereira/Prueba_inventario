@@ -27,7 +27,7 @@
     <tbody>
     {% for p in productos %}
       <tr{% if p.stock_min > 0 and p.stock <= p.stock_min %} class="bajo"{% endif %}>
-        <td class="mono"><a href="{% url 'producto_detalle' p.pk %}">{{ p.sku }}</a></td>
+        <td class="mono"><a href="{% url 'producto_detalle' p.pk %}{% if volver_param %}?{{ volver_param }}{% endif %}">{{ p.sku }}</a></td>
         <td>{{ p.nombre }}</td>
         <td>{{ p.categoria.nombre|default:"-" }}</td>
         <td class="num stock">{{ p.stock|cantidad }}{% if p.stock_min > 0 and p.stock <= p.stock_min %} <span class="insignia insignia-bajo">bajo mínimo</span>{% endif %}</td>
