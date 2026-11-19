@@ -5,17 +5,24 @@
   <div class="cabecera-pagina">
     <div>
       <h1>Kardex: {{ producto.nombre }}</h1>
-      <p class="subtitulo">Código <span class="mono">{{ producto.sku }}</span> · Stock actual: <strong class="{% if producto.stock_min > 0 and stock <= producto.stock_min %}error{% endif %}">{{ stock|cl }}</strong> {{ producto.unidad }}</p>
-    </div>
-    <div class="barra" style="margin:0">
-      {% if perms.inventario.registrar_salida %}<a class="boton" href="{% url 'salida' producto.pk %}">Registrar salida</a>{% endif %}
-      {% if perms.inventario.registrar_ajuste %}<a class="boton secundario" href="{% url 'ajuste' producto.pk %}">Ajuste</a>
-      <a class="boton secundario" href="{% url 'conteo' producto.pk %}">Conteo</a>{% endif %}
-      <a class="boton secundario" href="{% url 'producto_detalle' producto.pk %}">Volver a la ficha</a>
+      <p class="subtitulo">Código <span class="mono">{{ producto.sku }}</span> · <a href="{% url 'producto_detalle' producto.pk %}">Ver ficha</a></p>
     </div>
   </div>
 
-  <form method="get" class="tarjeta">
+  <div class="tarjeta">
+    <div class="etiqueta-cifra">Stock actual</div>
+    <div class="cifra{% if producto.stock_min > 0 and stock <= producto.stock_min %} alerta{% endif %}">{{ stock|cl }} <span class="ayuda">{{ producto.unidad }}</span></div>
+    {% if producto.stock_min > 0 and stock <= producto.stock_min %}<p><span class="insignia insignia-bajo">bajo mínimo</span> <span class="ayuda">(mínimo {{ producto.stock_min|cl }})</span></p>{% endif %}
+    <div class="acciones">
+      {% if perms.inventario.registrar_entrada %}<a class="boton grande" href="{% url 'entrada' producto.pk %}">Registrar entrada</a>{% endif %}
+      {% if perms.inventario.registrar_salida %}<a class="boton grande" href="{% url 'salida' producto.pk %}">Registrar salida</a>{% endif %}
+      {% if perms.inventario.registrar_ajuste %}<a class="boton secundario grande" href="{% url 'corregir' producto.pk %}">Corregir stock</a>{% endif %}
+    </div>
+  </div>
+
+  <details class="tarjeta historial"{% if abierto %} open{% endif %}>
+    <summary>Historial de movimientos ({{ total }})</summary>
+  <form method="get" class="filtro-fechas">
     <div class="campos-fila">
       <div class="campo"><label for="id_desde">Desde</label><input type="date" name="desde" id="id_desde" value="{{ filtro.data.desde }}"></div>
       <div class="campo"><label for="id_hasta">Hasta</label><input type="date" name="hasta" id="id_hasta" value="{{ filtro.data.hasta }}"></div>
@@ -62,4 +69,5 @@
   </nav>
   {% endif %}
   {% else %}<p class="vacio">No hay movimientos{% if saldo_inicial is not None %} en este período{% endif %}.</p>{% endif %}
+  </details>
 {% endblock %}

@@ -211,20 +211,34 @@ class SalidaForm(_MovimientoForm):
     motivo = forms.CharField(label="Motivo (opcional)", required=False, max_length=500)
 
 
-class AjusteForm(_MovimientoForm):
-    cantidad = _cantidad("Cantidad del ajuste (con signo: negativa resta, positiva suma)")
-    motivo = forms.CharField(label="Motivo (obligatorio)", max_length=500)
+class EntradaForm(_MovimientoForm):
+    """Mercaderia que llega. Proveedor y numero de factura/guia son opcionales."""
 
-    def clean_cantidad(self):
-        c = self.cleaned_data["cantidad"]
-        if c == 0:
-            raise forms.ValidationError("El ajuste no puede ser cero.")
-        return c
+    cantidad = _cantidad("Cantidad que llega", min_value=0.01)
+    costo_unitario = forms.DecimalField(
+        label="Costo unitario (opcional)", required=False, max_digits=14, decimal_places=2,
+        min_value=0, localize=True,
+    )
+    proveedor = forms.ModelChoiceField(label="Proveedor (opcional)", queryset=Proveedor.objects.order_by("nombre"),
+                                       required=False, empty_label="- Sin proveedor -")
+    numero = forms.CharField(label="Número de factura o guía (opcional)", required=False, max_length=50)
+    motivo = forms.CharField(label="Motivo o comentario (opcional)", required=False, max_length=500)
+
+    def clean_numero(self):
+        return normalizar_codigo(self.cleaned_data.get("numero"))
+
+    def clean(self):
+        datos = super().clean()
+        if datos.get("numero") and not datos.get("proveedor") and "numero" not in self.errors:
+            self.add_error("numero", "Para registrar un número de factura o guía hay que elegir el proveedor.")
+        return datos
 
 
 class ConteoForm(_MovimientoForm):
-    cantidad = _cantidad("Cantidad contada", min_value=0)
-    motivo = forms.CharField(label="Motivo (obligatorio)", max_length=500)
+    """«Corregir stock»: se escribe lo que hay en la bodega; el sistema registra la diferencia."""
+
+    cantidad = _cantidad("¿Cuántas unidades hay ahora en la bodega?", min_value=0)
+    motivo = forms.CharField(label="Motivo de la corrección (obligatorio)", max_length=500)
 
 
 class ReversaForm(_MovimientoForm):

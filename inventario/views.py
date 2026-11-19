@@ -9,6 +9,7 @@ from django.contrib import messages
 from django.contrib.auth.mixins import PermissionRequiredMixin
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
+from django.db import IntegrityError, transaction
 from django.db.models import Case, Count, IntegerField, Q, Sum, Value, When
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -18,10 +19,10 @@ from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
 from . import servicios, tokens
 from .forms import (
-    AjusteForm,
     CategoriaForm,
     CodigoAlternativoForm,
     ConteoForm,
+    EntradaForm,
     ProductoCrearForm,
     ProductoEditarForm,
     ProductoProveedorForm,
@@ -29,7 +30,7 @@ from .forms import (
     ReversaForm,
     SalidaForm,
 )
-from .models import Categoria, CodigoAlternativo, Movimiento, Producto, ProductoProveedor, Proveedor
+from .models import Categoria, CodigoAlternativo, Documento, Movimiento, Producto, ProductoProveedor, Proveedor
 from .servicios import StockInsuficiente
 from .templatetags.formato import formatear_numero
 from .validadores import normalizar_codigo
@@ -117,9 +118,12 @@ class ProductoNuevo(Permiso, MensajeExito, CreateView):
     permission_required = "inventario.add_producto"
     form_class = ProductoCrearForm
     template_name = "inventario/producto_form.html"
-    mensaje_exito = "Producto creado."
+    mensaje_exito = "Producto creado. Si llegó con mercadería, registra la entrada."
 
     def get_success_url(self):
+        # D-53: el kardex es el lugar para mover el stock
+        if self.request.user.has_perm("inventario.view_movimiento"):
+            return reverse("kardex", args=[self.object.pk])
         return reverse("producto_detalle", args=[self.object.pk])
 
 
@@ -362,11 +366,12 @@ class Kardex(Permiso, View):
                 "m": m, "saldo": saldo, "reversa_id": revertidos.get(m.pk),
                 "puede_revertir": m.revierte_id is None and m.pk not in revertidos,
             })
+        abierto = any(request.GET.get(k) for k in ("desde", "hasta", "page"))
         sufijo = "&".join(f"{k}={v}" for k, v in (("desde", desde), ("hasta", hasta)) if v)
         return render(request, "inventario/kardex.html", {
             "producto": producto, "stock": servicios.stock_de(producto), "filas": filas,
             "pagina": pagina, "filtro": filtro, "saldo_inicial": saldo_inicial if desde else None,
-            "filtro_qs": sufijo,
+            "filtro_qs": sufijo, "total": paginador.count, "abierto": abierto,
         })
 
 
@@ -460,24 +465,49 @@ class Salida(_FormularioMovimiento):
         return f"Salida registrada: {formatear_numero(-m.cantidad)} de {producto.sku}."
 
 
-class Ajuste(_FormularioMovimiento):
-    permission_required = "inventario.registrar_ajuste"
-    accion, form_class, titulo = "ajuste", AjusteForm, "Registrar ajuste"
+class Entrada(_FormularioMovimiento):
+    permission_required = "inventario.registrar_entrada"
+    accion, form_class, titulo = "entrada", EntradaForm, "Registrar entrada"
 
     def ejecutar(self, request, producto, d):
-        m = servicios.registrar_ajuste(producto, d["cantidad"], request.user, d["motivo"])
-        return f"Ajuste registrado: {formatear_numero(m.cantidad)} en {producto.sku}."
+        proveedor, numero = d.get("proveedor"), d.get("numero") or ""
+        with transaction.atomic():           # si el movimiento falla, tampoco queda el documento
+            documento = _factura_de(proveedor, numero) if proveedor else None
+            m = servicios.registrar_entrada(
+                producto, d["cantidad"], request.user, documento=documento,
+                costo_unitario=d.get("costo_unitario"), motivo=d.get("motivo") or "",
+            )
+        return f"Entrada registrada: {formatear_numero(m.cantidad)} de {producto.sku}."
+
+
+def _factura_de(proveedor, numero):
+    """Documento «factura» del proveedor con ese numero: se reutiliza si ya existe (D-29)."""
+    if numero:
+        existente = Documento.objects.filter(tipo=Documento.FACTURA, proveedor=proveedor, numero=numero).first()
+        if existente:
+            return existente
+    try:
+        with transaction.atomic():
+            return Documento.objects.create(
+                tipo=Documento.FACTURA, proveedor=proveedor, numero=numero,
+                nombre="Entrada manual" if not numero else "", fecha=timezone.localdate(),
+            )
+    except IntegrityError:                   # otra persona la creo en este instante
+        return Documento.objects.get(tipo=Documento.FACTURA, proveedor=proveedor, numero=numero)
 
 
 class Conteo(_FormularioMovimiento):
     permission_required = "inventario.registrar_ajuste"
-    accion, form_class, titulo = "conteo", ConteoForm, "Registrar conteo"
+    accion, form_class, titulo = "corregir", ConteoForm, "Corregir stock"
+
+    def contexto_extra(self, producto):
+        return {"ayuda": "Escribe lo que hay en la bodega y el motivo. El sistema registra la diferencia como un ajuste; el historial no se borra."}
 
     def ejecutar(self, request, producto, d):
         m = servicios.ajustar_a_conteo(producto, d["cantidad"], request.user, d["motivo"])
         if m is None:
             return f"Sin diferencia: el stock ya era {formatear_numero(d['cantidad'])}."
-        return (f"Conteo registrado: diferencia aplicada de {formatear_numero(m.cantidad)}; "
+        return (f"Stock corregido: diferencia aplicada de {formatear_numero(m.cantidad)}; "
                 f"el stock ahora es {formatear_numero(d['cantidad'])}.")
 
 
@@ -504,7 +534,6 @@ class Revertir(_FormularioMovimiento):
 # ---------------------------------------------------------------- importacion desde Eleventa (T-F1-08)
 from django.core.files.base import ContentFile  # noqa: E402
 from django.core.paginator import Paginator as _Paginator  # noqa: E402
-from django.db import IntegrityError  # noqa: E402
 
 from . import importar_eleventa  # noqa: E402
 from .forms import SubirEleventaForm  # noqa: E402

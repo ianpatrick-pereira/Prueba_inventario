@@ -196,3 +196,15 @@ table.simple { background: transparent; }
 }
 @media print { .barra-nav, .acciones, .buscador { display: none; } body { background: #fff; } }
 .boton.ancho, button.ancho, .centrado button[type=submit] { width: 100%; }
+
+/* historial plegable del kardex */
+details.historial { padding: 0; }
+details.historial > summary { cursor: pointer; padding: var(--s4) var(--s5); font-family: var(--font-display); font-size: 18px; font-weight: 700; color: var(--accent); list-style: none; display: flex; align-items: center; gap: var(--s2); }
+details.historial > summary::-webkit-details-marker { display: none; }
+details.historial > summary::before { content: "\25B6"; font-size: 12px; transition: transform .15s; }
+details.historial[open] > summary::before { transform: rotate(90deg); }
+details.historial > summary:hover { background: var(--accent-soft); }
+details.historial > :not(summary) { margin-left: var(--s5); margin-right: var(--s5); }
+details.historial > .tabla-scroll { box-shadow: none; }
+details.historial > .paginas { margin-bottom: var(--s5); }
+.filtro-fechas { margin-bottom: var(--s4); }
