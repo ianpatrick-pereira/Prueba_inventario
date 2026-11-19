@@ -1,23 +1,36 @@
 """Pantallas del catalogo (T-F1-06). Cada vista exige el permiso de Django que le corresponde;
 sin permiso -> 403 y sin sesion -> login (LoginRequiredMiddleware)."""
+import datetime as _dt
+from decimal import Decimal
+
+from django import forms as _forms
 from django.contrib import messages
 from django.contrib.auth.mixins import PermissionRequiredMixin
-from django.db.models import Case, IntegerField, Q, Value, When
-from django.shortcuts import get_object_or_404, redirect
+from django.core.exceptions import ValidationError
+from django.core.paginator import Paginator
+from django.db.models import Case, IntegerField, Q, Sum, Value, When
+from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.urls import reverse, reverse_lazy
 from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
-from . import servicios
+from . import servicios, tokens
 from .forms import (
+    AjusteForm,
     CategoriaForm,
     CodigoAlternativoForm,
+    ConteoForm,
     ProductoCrearForm,
     ProductoEditarForm,
     ProductoProveedorForm,
     ProveedorForm,
+    ReversaForm,
+    SalidaForm,
 )
-from .models import Categoria, CodigoAlternativo, Producto, ProductoProveedor, Proveedor
+from .models import Categoria, CodigoAlternativo, Movimiento, Producto, ProductoProveedor, Proveedor
+from .servicios import StockInsuficiente
+from .templatetags.formato import formatear_numero
 from .validadores import normalizar_codigo
 
 
@@ -162,8 +175,6 @@ class _QuitarCodigo(Permiso, View):
         return get_object_or_404(self.model.objects.select_related("producto"), pk=pk)
 
     def get(self, request, pk):
-        from django.shortcuts import render
-
         return render(request, self.template_name, {"objeto": self._objeto(pk), "tipo": self.etiqueta})
 
     def post(self, request, pk):
@@ -253,3 +264,191 @@ class CategoriaEditar(Permiso, MensajeExito, UpdateView):
     success_url = reverse_lazy("categoria_lista")
     mensaje_exito = "Categoría actualizada."
     extra_context = {"titulo": "Editar categoría", "volver": reverse_lazy("categoria_lista")}
+
+
+# ---------------------------------------------------------------- kardex y movimientos (T-F1-07)
+KARDEX_POR_PAGINA = 100
+
+
+class _FiltroFechas(_forms.Form):
+    desde = _forms.DateField(required=False, label="Desde")
+    hasta = _forms.DateField(required=False, label="Hasta")
+
+
+def _inicio_del_dia(fecha):
+    return timezone.make_aware(_dt.datetime.combine(fecha, _dt.time.min))
+
+
+class Kardex(Permiso, View):
+    permission_required = "inventario.view_movimiento"
+
+    def get(self, request, pk):
+        producto = get_object_or_404(Producto, pk=pk)
+        filtro = _FiltroFechas(request.GET)
+        desde = hasta = None
+        if filtro.is_valid():
+            desde, hasta = filtro.cleaned_data["desde"], filtro.cleaned_data["hasta"]
+        qs = Movimiento.objects.filter(producto=producto)
+        saldo = Decimal("0")
+        if desde:
+            # Saldo inicial del periodo: todo lo anterior al comienzo del dia «desde».
+            limite = _inicio_del_dia(desde)
+            saldo = qs.filter(fecha__lt=limite).aggregate(t=Sum("cantidad"))["t"] or Decimal("0")
+            qs = qs.filter(fecha__gte=limite)
+        saldo_inicial = saldo
+        if hasta:
+            qs = qs.filter(fecha__lt=_inicio_del_dia(hasta + _dt.timedelta(days=1)))
+        qs = qs.select_related("usuario", "documento").order_by("fecha", "id")
+        paginador = Paginator(qs, KARDEX_POR_PAGINA)
+        pagina = paginador.get_page(request.GET.get("page"))
+        previos = (pagina.number - 1) * KARDEX_POR_PAGINA
+        if previos:  # el saldo continua desde las paginas anteriores
+            saldo += sum(qs.values_list("cantidad", flat=True)[:previos], Decimal("0"))
+        ids = [m.pk for m in pagina]
+        revertidos = dict(
+            Movimiento.objects.filter(revierte_id__in=ids).values_list("revierte_id", "id")
+        )
+        filas = []
+        for m in pagina:
+            saldo += m.cantidad
+            filas.append({
+                "m": m, "saldo": saldo, "reversa_id": revertidos.get(m.pk),
+                "puede_revertir": m.revierte_id is None and m.pk not in revertidos,
+            })
+        sufijo = "&".join(f"{k}={v}" for k, v in (("desde", desde), ("hasta", hasta)) if v)
+        return render(request, "inventario/kardex.html", {
+            "producto": producto, "stock": servicios.stock_de(producto), "filas": filas,
+            "pagina": pagina, "filtro": filtro, "saldo_inicial": saldo_inicial if desde else None,
+            "filtro_qs": sufijo,
+        })
+
+
+def _texto_stock_insuficiente(e):
+    return (f"Stock insuficiente: hay {formatear_numero(e.stock_actual)} y se pide "
+            f"{formatear_numero(e.cantidad_pedida)}.")
+
+
+class _FormularioMovimiento(Permiso, View):
+    """Patron GET (formulario con token) -> POST (consume el token) -> redireccion (D-45).
+    Las pantallas siempre usan request.user y nunca permitir_negativo (D-40); la fecha es
+    siempre «ahora» (D-44: no hay campo de fecha, y cualquier fecha enviada se ignora)."""
+
+    accion = ""
+    form_class = None
+    titulo = ""
+    template_name = "inventario/movimiento_form.html"
+
+    def objetivo(self, pk):
+        return get_object_or_404(Producto, pk=pk)
+
+    def producto_de(self, objetivo):
+        return objetivo
+
+    def clave(self, objetivo):
+        return f"{self.accion}:{objetivo.pk}"
+
+    def contexto_extra(self, objetivo):
+        return {}
+
+    def ejecutar(self, request, objetivo, datos):
+        raise NotImplementedError
+
+    def render_form(self, request, objetivo, form, status=200):
+        producto = self.producto_de(objetivo)
+        ctx = {"form": form, "titulo": self.titulo, "objetivo": objetivo, "producto": producto,
+               "stock": servicios.stock_de(producto)}
+        ctx.update(self.contexto_extra(objetivo))
+        return render(request, self.template_name, ctx, status=status)
+
+    def get(self, request, pk):
+        objetivo = self.objetivo(pk)
+        form = self.form_class(initial={"token": tokens.emitir(request, self.clave(objetivo))})
+        return self.render_form(request, objetivo, form)
+
+    def post(self, request, pk):
+        objetivo = self.objetivo(pk)
+        destino = redirect("kardex", pk=self.producto_de(objetivo).pk)
+        form = self.form_class(request.POST)
+        if not form.is_valid():
+            return self.render_form(request, objetivo, form)
+        if not tokens.consumir(request, form.cleaned_data["token"], self.clave(objetivo)):
+            messages.warning(
+                request,
+                "Este formulario ya se había enviado (o venció): no se registró nada nuevo. "
+                "Revisa el kardex antes de repetirlo.",
+            )
+            return destino
+        try:
+            mensaje = self.ejecutar(request, objetivo, form.cleaned_data)
+        except StockInsuficiente as e:
+            return self._con_error(request, objetivo, None, _texto_stock_insuficiente(e))
+        except ValidationError as e:
+            return self._con_error(request, objetivo, e, None)
+        # PermissionDenied sube tal cual: Django responde 403.
+        messages.success(request, mensaje)
+        return destino
+
+    def _con_error(self, request, objetivo, excepcion, texto):
+        # El token ya se consumio: se emite uno nuevo para poder corregir y reenviar.
+        datos = request.POST.copy()
+        datos["token"] = tokens.emitir(request, self.clave(objetivo))
+        form = self.form_class(datos)
+        form.is_valid()
+        if texto:
+            form.add_error(None, texto)
+        elif hasattr(excepcion, "error_dict"):
+            for campo, errores in excepcion.message_dict.items():
+                form.add_error(campo if campo in form.fields else None, errores)
+        else:
+            form.add_error(None, excepcion.messages)
+        return self.render_form(request, objetivo, form)
+
+
+class Salida(_FormularioMovimiento):
+    permission_required = "inventario.registrar_salida"
+    accion, form_class, titulo = "salida", SalidaForm, "Registrar salida"
+
+    def ejecutar(self, request, producto, d):
+        m = servicios.registrar_salida(producto, d["cantidad"], request.user, motivo=d["motivo"])
+        return f"Salida registrada: {formatear_numero(-m.cantidad)} de {producto.sku}."
+
+
+class Ajuste(_FormularioMovimiento):
+    permission_required = "inventario.registrar_ajuste"
+    accion, form_class, titulo = "ajuste", AjusteForm, "Registrar ajuste"
+
+    def ejecutar(self, request, producto, d):
+        m = servicios.registrar_ajuste(producto, d["cantidad"], request.user, d["motivo"])
+        return f"Ajuste registrado: {formatear_numero(m.cantidad)} en {producto.sku}."
+
+
+class Conteo(_FormularioMovimiento):
+    permission_required = "inventario.registrar_ajuste"
+    accion, form_class, titulo = "conteo", ConteoForm, "Registrar conteo"
+
+    def ejecutar(self, request, producto, d):
+        m = servicios.ajustar_a_conteo(producto, d["cantidad"], request.user, d["motivo"])
+        if m is None:
+            return f"Sin diferencia: el stock ya era {formatear_numero(d['cantidad'])}."
+        return (f"Conteo registrado: diferencia aplicada de {formatear_numero(m.cantidad)}; "
+                f"el stock ahora es {formatear_numero(d['cantidad'])}.")
+
+
+class Revertir(_FormularioMovimiento):
+    permission_required = "inventario.revertir_movimiento"
+    accion, form_class, titulo = "revertir", ReversaForm, "Revertir movimiento"
+    template_name = "inventario/revertir.html"
+
+    def objetivo(self, pk):
+        return get_object_or_404(Movimiento.objects.select_related("producto", "usuario"), pk=pk)
+
+    def producto_de(self, movimiento):
+        return movimiento.producto
+
+    def contexto_extra(self, m):
+        ya = Movimiento.objects.filter(revierte=m).first()
+        return {"m": m, "es_reversa": m.revierte_id is not None, "reversa": ya}
+
+    def ejecutar(self, request, m, d):
+        servicios.revertir(m, request.user, d["motivo"])
+        return f"Movimiento revertido: el stock de {m.producto.sku} volvió a lo que era antes."

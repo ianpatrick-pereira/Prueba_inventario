@@ -165,3 +165,40 @@ class ProductoProveedorForm(forms.ModelForm):
     def save(self, commit=True):
         self.instance.producto = self.producto
         return super().save(commit)
+
+
+# ---------------------------------------------------------------- movimientos (T-F1-07)
+class _MovimientoForm(forms.Form):
+    """Base: token de un solo uso (D-45). No hay campo de fecha (D-44): siempre es «ahora»."""
+
+    token = forms.CharField(widget=forms.HiddenInput)
+
+
+def _cantidad(label, **kw):
+    # localize=True: acepta «2,5» (coma) ademas de «2.5».
+    return forms.DecimalField(label=label, max_digits=12, decimal_places=2, localize=True, **kw)
+
+
+class SalidaForm(_MovimientoForm):
+    cantidad = _cantidad("Cantidad que sale", min_value=0.01)
+    motivo = forms.CharField(label="Motivo (opcional)", required=False, max_length=500)
+
+
+class AjusteForm(_MovimientoForm):
+    cantidad = _cantidad("Cantidad del ajuste (con signo: negativa resta, positiva suma)")
+    motivo = forms.CharField(label="Motivo (obligatorio)", max_length=500)
+
+    def clean_cantidad(self):
+        c = self.cleaned_data["cantidad"]
+        if c == 0:
+            raise forms.ValidationError("El ajuste no puede ser cero.")
+        return c
+
+
+class ConteoForm(_MovimientoForm):
+    cantidad = _cantidad("Cantidad contada", min_value=0)
+    motivo = forms.CharField(label="Motivo (obligatorio)", max_length=500)
+
+
+class ReversaForm(_MovimientoForm):
+    motivo = forms.CharField(label="Motivo (obligatorio)", max_length=500)

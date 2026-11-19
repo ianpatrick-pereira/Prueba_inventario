@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% load formato %}
+{% block titulo %}{{ titulo }} - Sistema de inventario{% endblock %}
+{% block contenido %}
+  <h1>{{ titulo }}</h1>
+  <p>Producto: <strong>{{ producto.sku }}</strong> - {{ producto.nombre }}.
+     Stock actual: <strong>{{ stock|cl }}</strong></p>
+  <form method="post" class="tarjeta">
+    {% csrf_token %}
+    {{ form.token }}
+    {{ form.non_field_errors }}
+    {% for campo in form.visible_fields %}
+      <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
+      {{ campo }}
+      {{ campo.errors }}
+    {% endfor %}
+    <p class="ayuda">La fecha y hora del movimiento son siempre las de ahora.</p>
+    <p><button type="submit">Guardar</button>
+      <a class="boton secundario" href="{% url 'kardex' producto.pk %}">Cancelar</a></p>
+  </form>
+{% endblock %}
