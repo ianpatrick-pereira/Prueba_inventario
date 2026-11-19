@@ -17,7 +17,7 @@
     <button type="submit">Filtrar</button>
     {% if filtro.data.desde or filtro.data.hasta %}<a class="boton secundario" href="{% url 'kardex' producto.pk %}">Quitar filtro</a>{% endif %}
   </form>
-  {% if filtro.errors %}<p class="error">Fecha no válida: usa el formato AAAA-MM-DD.</p>{% endif %}
+  {% if filtro.errors %}<p class="error">Fecha no válida (usa AAAA-MM-DD, entre 2000-01-01 y 2100-12-31): no se aplicó el filtro.</p>{% endif %}
 
   {% if saldo_inicial is not None %}<p>Saldo inicial del período: <strong>{{ saldo_inicial|cl }}</strong></p>{% endif %}
 
@@ -44,7 +44,8 @@
   </table>
   {% if pagina.has_other_pages %}
   <div class="paginas">
-    {% if pagina.has_previous %}<a href="?page={{ pagina.previous_page_number }}{% if filtro_qs %}&amp;{{ filtro_qs }}{% endif %}">Anterior</a>{% endif %}
+    {% if pagina.has_previous %}<a href="?page=1{% if filtro_qs %}&amp;{{ filtro_qs }}{% endif %}">Primera</a>
+    <a href="?page={{ pagina.previous_page_number }}{% if filtro_qs %}&amp;{{ filtro_qs }}{% endif %}">Anterior</a>{% endif %}
     <span>Página {{ pagina.number }} de {{ pagina.paginator.num_pages }}</span>
     {% if pagina.has_next %}<a href="?page={{ pagina.next_page_number }}{% if filtro_qs %}&amp;{{ filtro_qs }}{% endif %}">Siguiente</a>
     <a href="?page={{ pagina.paginator.num_pages }}{% if filtro_qs %}&amp;{{ filtro_qs }}{% endif %}">Última</a>{% endif %}

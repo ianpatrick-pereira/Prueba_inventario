@@ -462,7 +462,7 @@ def test_un_fallo_a_mitad_no_deja_nada(adm, monkeypatch):
     visto = {}
 
     def escribe_y_falla(*a, **k):
-        movs = real(*a, **k)                         # los movimientos SI se escribieron...
+        real(*a, **k)                                # los movimientos SI se escribieron...
         visto["movimientos"] = Movimiento.objects.count()
         visto["productos"] = Producto.objects.count()
         raise RuntimeError("fallo simulado")         # ...y luego algo falla

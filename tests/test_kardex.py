@@ -154,8 +154,9 @@ def test_kardex_consultas_acotadas(adm, admin_user, prod):
     servicios.revertir(Movimiento.objects.first(), admin_user, "x", permitir_negativo=True)
     con_6 = _consultas(adm, url)
     _llenar(prod, admin_user, 145, desde=10)
-    assert _consultas(adm, url) == con_6          # misma cantidad de consultas con 6 y con 151 movimientos
-    assert len(adm.get(url).context["filas"]) == 100
+    assert _consultas(adm, url + "?page=1") == con_6      # misma pagina, mismas consultas con 6 y 151 movimientos
+    assert len(adm.get(url + "?page=1").context["filas"]) == 100
+    assert _consultas(adm, url) <= con_6 + 1               # ultima pagina: a lo sumo la consulta de saldo previo
 
 
 # ------------------------------------------------------------------ 2. reversas enlazadas y boton

@@ -59,3 +59,14 @@ Con `--superusuario` también puede crear usuarios y asignarles grupo en `/admin
 ### Pruebas
 
 Con el entorno activado: `pytest`. Las pruebas no usan tu `.env`.
+
+
+## Operación segura
+
+- **No revertir migraciones con datos reales.** Para volver atrás, se restaura el respaldo de la base de datos (revertir una migración puede borrar columnas o permisos).
+- **Antes de migrar una base real:** hacer un respaldo y consultar si hay valores negativos en costo, precios o stock mínimo/máximo (las migraciones nuevas agregan restricciones de «no negativo» y fallarían).
+- **Los permisos de los grupos «Administrador» y «Operador» se cambian solo por migración**, no a mano en `/admin/`.
+- **Nunca marcar `is_staff` a un operador:** le daría acceso al panel `/admin/`.
+- **`crear_administrador` se usa solo de forma interactiva en una terminal** (pide la contraseña por teclado).
+- **Si un formulario dice «vencido» o «ya se había enviado»,** recarga la página (para obtener un formulario nuevo) y revisa el kardex antes de repetir la operación.
+- En el panel `/admin/` el código de un producto, el código alternativo y el código de proveedor no se pueden cambiar una vez creados: para corregirlos, se quita y se vuelve a agregar.

@@ -11,12 +11,57 @@ from .models import (
     Proveedor,
 )
 
-admin.site.register(Categoria)
-admin.site.register(Proveedor)
-admin.site.register(Producto)
-admin.site.register(CodigoAlternativo)
-admin.site.register(ProductoProveedor)
+from .forms import (
+    CategoriaForm,
+    CodigoAlternativoAdminForm,
+    ProductoAdminForm,
+    ProductoProveedorAdminForm,
+    ProveedorForm,
+)
+
 admin.site.register(Documento)
+
+
+class _SoloLecturaAlEditar(admin.ModelAdmin):
+    """Campos clave que no se cambian una vez creados (para cambiarlos: quitar y volver a agregar)."""
+
+    campos_fijos = ()
+
+    def get_readonly_fields(self, request, obj=None):
+        base = tuple(super().get_readonly_fields(request, obj))
+        return base + tuple(self.campos_fijos) if obj is not None else base
+
+
+@admin.register(Categoria)
+class CategoriaAdmin(admin.ModelAdmin):
+    form = CategoriaForm        # rechaza nombres que solo difieren en mayusculas o espacios
+
+
+@admin.register(Proveedor)
+class ProveedorAdmin(admin.ModelAdmin):
+    form = ProveedorForm        # nombre unico sin mayusculas/espacios y RUT normalizado (D-42)
+
+
+@admin.register(Producto)
+class ProductoAdmin(_SoloLecturaAlEditar):
+    form = ProductoAdminForm    # no negativos, maximo >= minimo, sku normalizado
+    campos_fijos = ("sku",)     # D-43: llave de sincronizacion con Eleventa
+    list_display = ("sku", "nombre", "categoria")
+    search_fields = ("sku", "nombre")
+
+
+@admin.register(CodigoAlternativo)
+class CodigoAlternativoAdmin(_SoloLecturaAlEditar):
+    form = CodigoAlternativoAdminForm
+    campos_fijos = ("valor",)
+    list_display = ("valor", "tipo", "producto")
+
+
+@admin.register(ProductoProveedor)
+class ProductoProveedorAdmin(_SoloLecturaAlEditar):
+    form = ProductoProveedorAdminForm
+    campos_fijos = ("proveedor", "codigo_proveedor")
+    list_display = ("proveedor", "codigo_proveedor", "producto")
 
 
 @admin.register(Movimiento)

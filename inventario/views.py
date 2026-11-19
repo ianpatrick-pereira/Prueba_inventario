@@ -270,9 +270,25 @@ class CategoriaEditar(Permiso, MensajeExito, UpdateView):
 KARDEX_POR_PAGINA = 100
 
 
+FECHA_MINIMA = _dt.date(2000, 1, 1)
+FECHA_MAXIMA = _dt.date(2100, 12, 31)
+
+
 class _FiltroFechas(_forms.Form):
     desde = _forms.DateField(required=False, label="Desde")
     hasta = _forms.DateField(required=False, label="Hasta")
+
+    def _en_rango(self, campo):
+        f = self.cleaned_data.get(campo)
+        if f is not None and not (FECHA_MINIMA <= f <= FECHA_MAXIMA):
+            raise _forms.ValidationError("Fecha fuera de rango.")
+        return f
+
+    def clean_desde(self):
+        return self._en_rango("desde")
+
+    def clean_hasta(self):
+        return self._en_rango("hasta")
 
 
 def _inicio_del_dia(fecha):
@@ -300,7 +316,8 @@ class Kardex(Permiso, View):
             qs = qs.filter(fecha__lt=_inicio_del_dia(hasta + _dt.timedelta(days=1)))
         qs = qs.select_related("usuario", "documento").order_by("fecha", "id")
         paginador = Paginator(qs, KARDEX_POR_PAGINA)
-        pagina = paginador.get_page(request.GET.get("page"))
+        # Sin pagina pedida se abre la ULTIMA (lo mas reciente); los saldos siguen continuos.
+        pagina = paginador.get_page(request.GET.get("page") or paginador.num_pages)
         previos = (pagina.number - 1) * KARDEX_POR_PAGINA
         if previos:  # el saldo continua desde las paginas anteriores
             saldo += sum(qs.values_list("cantidad", flat=True)[:previos], Decimal("0"))

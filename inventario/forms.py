@@ -119,6 +119,12 @@ class ProductoCrearForm(_ProductoBaseForm):
         return sku
 
 
+class ProductoAdminForm(ProductoCrearForm):
+    """Formulario del panel de administracion: mismas reglas que las pantallas (no negativos,
+    maximo >= minimo, sku sin espacios y unico). En edicion el sku es de solo lectura (D-43):
+    el admin lo saca del formulario y esta validacion no corre."""
+
+
 class ProductoEditarForm(_ProductoBaseForm):
     """D-43: sin campo sku; aunque llegue por POST, se ignora."""
 
@@ -243,3 +249,42 @@ class SubirEleventaForm(forms.Form):
             raise forms.ValidationError(e.messages)
         self.contenido = contenido
         return f
+
+
+# ---------------------------------------------------------------- formularios del panel de administracion
+class CodigoAlternativoAdminForm(forms.ModelForm):
+    class Meta:
+        model = CodigoAlternativo
+        fields = ["producto", "tipo", "valor"]
+
+    def clean_valor(self):
+        valor = normalizar_codigo(self.cleaned_data.get("valor"))
+        if not valor:
+            raise forms.ValidationError("Este campo es obligatorio.")
+        otro = CodigoAlternativo.objects.select_related("producto").exclude(pk=self.instance.pk).filter(valor=valor).first()
+        if otro:
+            raise forms.ValidationError(f"El código «{valor}» ya pertenece al producto {otro.producto}.")
+        return valor
+
+
+class ProductoProveedorAdminForm(forms.ModelForm):
+    class Meta:
+        model = ProductoProveedor
+        fields = ["producto", "proveedor", "codigo_proveedor"]
+
+    def clean_codigo_proveedor(self):
+        codigo = normalizar_codigo(self.cleaned_data.get("codigo_proveedor"))
+        if not codigo:
+            raise forms.ValidationError("Este campo es obligatorio.")
+        return codigo
+
+    def clean(self):
+        datos = super().clean()
+        proveedor, codigo = datos.get("proveedor"), datos.get("codigo_proveedor")
+        if proveedor and codigo:
+            otro = ProductoProveedor.objects.select_related("producto").exclude(
+                pk=self.instance.pk).filter(proveedor=proveedor, codigo_proveedor=codigo).first()
+            if otro:
+                self.add_error("codigo_proveedor",
+                               f"{proveedor} ya usa el código «{codigo}» para el producto {otro.producto}.")
+        return datos
