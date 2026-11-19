@@ -12,7 +12,9 @@
     <section class="tarjeta seccion">
       <h2>Identificación</h2>
       <div class="campos-fila dos-columnas">
-        {% if form.sku %}{% include "inventario/_campo.html" with campo=form.sku %}{% endif %}
+        {% if form.sku %}{% include "inventario/_campo.html" with campo=form.sku %}{% else %}
+        <div class="campo"><label>Código</label><div class="valor-fijo mono">{{ object.sku }}</div><div class="ayuda">El código no se cambia desde las pantallas.</div></div>
+        {% endif %}
         {% include "inventario/_campo.html" with campo=form.nombre %}
         {% include "inventario/_campo.html" with campo=form.categoria %}
         {% include "inventario/_campo.html" with campo=form.unidad %}

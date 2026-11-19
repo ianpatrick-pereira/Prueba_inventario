@@ -490,3 +490,40 @@ def test_buscadores_tablas_y_vacios_comparten_el_mismo_ancho():
     for regla in (".herramientas", ".tabla-scroll", ".vacio", ".tarjeta"):
         cuerpo = re.search(re.escape(regla) + r"\s*\{([^}]*)\}", CSS).group(1)
         assert "max-width" not in cuerpo and not re.search(r"margin:\s*[^;]*auto", cuerpo), regla
+
+
+# ------------------------------------------------------------------ barra lateral a todo el alto e identificacion 2x2
+def test_la_barra_lateral_ocupa_todo_el_alto_aunque_la_pagina_sea_mas_alta(adm):
+    lateral = re.search(r"\n\.lateral\s*\{([^}]*)\}", CSS).group(1)
+    assert "height" not in lateral and "position" not in lateral           # el fondo se estira con la pagina
+    interior = re.search(r"\n\.lateral-interior\s*\{([^}]*)\}", CSS).group(1)
+    assert "position: sticky" in interior and "top: 0" in interior and "height: 100vh" in interior
+    assert "overflow-y: auto" in interior and "flex-direction: column" in interior   # desplazamiento propio
+    t = html(adm.get("/"))
+    assert '<aside class="lateral">\n    <div class="lateral-interior">' in t
+    interior_html = t.split('<div class="lateral-interior">')[1].split("</aside>")[0]
+    assert interior_html.index('<nav aria-label="Principal">') < interior_html.index('class="usuario"')   # usuario al final
+    assert re.search(r"\.usuario\s*\{[^}]*margin-top:\s*auto", CSS)
+
+
+def test_en_celular_la_barra_lateral_sigue_siendo_una_barra_superior():
+    movil = CSS.split("@media (max-width: 800px)", 1)[1].split("@media", 1)[0]
+    assert re.search(r"\.lateral-interior\s*\{[^}]*position:\s*static[^}]*height:\s*auto", movil)
+    assert "flex-direction: row" in movil
+
+
+def test_identificacion_codigo_y_nombre_en_la_primera_fila_categoria_y_unidad_en_la_segunda(adm):
+    t = html(adm.get(reverse("producto_nuevo")))
+    ident = t.split("<h2>Identificación</h2>")[1].split("</section>")[0]
+    assert 'class="campos-fila dos-columnas"' in ident
+    orden = [ident.index(f'for="id_{n}"') for n in ("sku", "nombre", "categoria", "unidad")]
+    assert orden == sorted(orden)
+    assert re.search(r"\.campos-fila\.dos-columnas\s*\{[^}]*repeat\(2", CSS)
+
+
+def test_al_editar_se_muestra_el_codigo_fijo_en_la_primera_posicion(adm):
+    p = prod("FIJO")
+    t = html(adm.get(reverse("producto_editar", args=[p.pk])))
+    ident = t.split("<h2>Identificación</h2>")[1].split("</section>")[0]
+    assert '<div class="valor-fijo mono">FIJO</div>' in ident and 'name="sku"' not in t
+    assert ident.index("valor-fijo") < ident.index('for="id_nombre"') < ident.index('for="id_categoria"') < ident.index('for="id_unidad"')

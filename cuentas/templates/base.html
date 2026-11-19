@@ -12,6 +12,7 @@
   {% if user.is_authenticated %}
   {% with u=request.resolver_match.url_name %}
   <aside class="lateral">
+    <div class="lateral-interior">
     <a class="marca" href="{% url 'inicio' %}">Inventario</a>
     <nav aria-label="Principal">
       {% if perms.inventario.view_producto %}<a href="{% url 'producto_lista' %}"{% if u|empieza_con:'producto' or u|empieza_con:'codigo' or u == 'kardex' or u == 'salida' or u == 'entrada' or u == 'corregir' or u == 'conteo' or u|empieza_con:'movimiento' %} aria-current="page"{% endif %}><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg><span>Productos</span></a>{% endif %}
@@ -22,6 +23,7 @@
     <div class="usuario">
       <span>{{ user.get_username }}</span>
       <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" class="boton-enlace">Cerrar sesión</button></form>
+    </div>
     </div>
   </aside>
   {% endwith %}

@@ -47,9 +47,13 @@ kbd { font-family: var(--font-mono); font-size: 12px; background: #fff; border: 
 
 /* ---------- barra lateral ---------- */
 .lateral {
+  /* ocupa SIEMPRE todo el alto de la pagina (se estira con el contenido); lo de adentro queda fijo a la vista */
   width: var(--ancho-lateral); flex: 0 0 var(--ancho-lateral); background: var(--lateral); color: var(--lateral-fg);
-  padding: var(--s3) 0; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
-  overflow-y: auto; overflow-x: hidden; min-width: 0; overflow-wrap: anywhere;
+  min-width: 0; overflow-wrap: anywhere;
+}
+.lateral-interior {
+  position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
+  padding: var(--s3) 0; overflow-y: auto; overflow-x: hidden;
 }
 .marca { display: block; font-family: var(--font-display); font-weight: 700; font-size: 20px; color: #fff; text-decoration: none; margin: 0 var(--s3) var(--s3); letter-spacing: -.01em; }
 .lateral nav { display: flex; flex-direction: column; gap: 2px; }
@@ -258,7 +262,8 @@ body:not(.con-lateral) .marca-ingreso { color: var(--lateral); font-family: var(
 /* ---------- celular: la barra lateral pasa a barra superior compacta ---------- */
 @media (max-width: 800px) {
   body.con-lateral { display: block; }
-  .lateral { position: static; width: 100%; height: auto; flex: none; padding: var(--s1) var(--s2); flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px var(--s2); overflow: visible; }
+  .lateral { width: 100%; flex: none; }
+  .lateral-interior { position: static; height: auto; padding: var(--s1) var(--s2); flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px var(--s2); overflow: visible; }
   .marca { margin: 0 auto 0 0; font-size: 18px; }
   .lateral .usuario { margin: 0; padding: 0; border: 0; flex-direction: row; align-items: center; gap: var(--s2); order: 2; }
   .lateral nav { flex-direction: row; flex-wrap: wrap; width: 100%; order: 3; gap: 4px; }
@@ -285,7 +290,7 @@ body:not(.con-lateral) .marca-ingreso { color: var(--lateral); font-family: var(
 @media print {
   @page { margin: 12mm; }
   body, body.con-lateral { display: block; background: #fff; color: #000; font-size: 11pt; }
-  .lateral, .barra, .herramientas, .chips, .migas, .mensajes, .saltar, .acciones, .paginas, .no-imprimir, .solo-js,
+  .lateral, .lateral-interior, .barra, .herramientas, .chips, .migas, .mensajes, .saltar, .acciones, .paginas, .no-imprimir, .solo-js,
   .pista, .aviso-filtro, button, .barra-stock, .cabecera-pagina .barra, nav { display: none !important; }
   .contenedor { padding: 0; max-width: none; }
   .tabla-scroll { box-shadow: none; border: 0; max-height: none; overflow: visible; border-radius: 0; }
@@ -298,3 +303,5 @@ body:not(.con-lateral) .marca-ingreso { color: var(--lateral); font-family: var(
 }
 .solo-impresion-bloque { display: none; }
 @media print { .solo-impresion-bloque { display: block !important; margin-bottom: 8px; } }
+
+.valor-fijo { min-height: 44px; display: flex; align-items: center; padding: 0 12px; background: var(--cabecera-tabla); border: 1px solid var(--line); border-radius: var(--radio-chico); font-weight: 600; }
