@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block titulo %}Sistema de inventario{% endblock %}</title>
   <link rel="stylesheet" href="{% static 'css/sistema.css' %}">
+  <script src="{% static 'js/sistema.js' %}" defer></script>
 </head>
 <body{% if user.is_authenticated %} class="con-lateral"{% endif %}>
   <a class="saltar" href="#contenido">Saltar al contenido</a>
@@ -13,10 +14,10 @@
   <aside class="lateral">
     <a class="marca" href="{% url 'inicio' %}">Inventario</a>
     <nav aria-label="Principal">
-      {% if perms.inventario.view_producto %}<a href="{% url 'producto_lista' %}"{% if u|empieza_con:'producto' or u|empieza_con:'codigo' or u == 'kardex' or u == 'salida' or u == 'entrada' or u == 'corregir' or u == 'conteo' or u|empieza_con:'movimiento' %} aria-current="page"{% endif %}>Productos</a>{% endif %}
-      {% if perms.inventario.view_proveedor %}<a href="{% url 'proveedor_lista' %}"{% if u|empieza_con:'proveedor' %} aria-current="page"{% endif %}>Proveedores</a>{% endif %}
-      {% if perms.inventario.view_categoria %}<a href="{% url 'categoria_lista' %}"{% if u|empieza_con:'categoria' %} aria-current="page"{% endif %}>Categorías</a>{% endif %}
-      {% if perms.inventario.importar_eleventa %}<a href="{% url 'importar_eleventa' %}"{% if u|empieza_con:'importar' %} aria-current="page"{% endif %}>Importar desde Eleventa</a>{% endif %}
+      {% if perms.inventario.view_producto %}<a href="{% url 'producto_lista' %}"{% if u|empieza_con:'producto' or u|empieza_con:'codigo' or u == 'kardex' or u == 'salida' or u == 'entrada' or u == 'corregir' or u == 'conteo' or u|empieza_con:'movimiento' %} aria-current="page"{% endif %}><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg><span>Productos</span></a>{% endif %}
+      {% if perms.inventario.view_proveedor %}<a href="{% url 'proveedor_lista' %}"{% if u|empieza_con:'proveedor' %} aria-current="page"{% endif %}><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="6" width="14" height="10" rx="1"/><path d="M15 9h4l3 3v4h-7"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg><span>Proveedores</span></a>{% endif %}
+      {% if perms.inventario.view_categoria %}<a href="{% url 'categoria_lista' %}"{% if u|empieza_con:'categoria' %} aria-current="page"{% endif %}><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12l-8 8-9-9V3h8l9 9z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg><span>Categorías</span></a>{% endif %}
+      {% if perms.inventario.importar_eleventa %}<a href="{% url 'importar_eleventa' %}"{% if u|empieza_con:'importar' %} aria-current="page"{% endif %}><svg class="icono" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 20h16"/></svg><span>Importar desde Eleventa</span></a>{% endif %}
     </nav>
     <div class="usuario">
       <span>{{ user.get_username }}</span>

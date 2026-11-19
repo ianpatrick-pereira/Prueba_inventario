@@ -1,16 +1,75 @@
 {% extends "base.html" %}
+{% load formato %}
 {% block contenido %}
   <div class="cabecera-pagina">
     <div>
-      <h1>Sistema de inventario</h1>
+      <h1>Panel del día</h1>
       <p class="subtitulo">Usuario: <strong>{{ user.get_username }}</strong> · Perfil: <strong>{{ perfil }}</strong></p>
     </div>
+    {% if perms.inventario.view_producto %}<div class="barra"><a class="boton" href="{% url 'producto_lista' %}">Ir a productos</a></div>{% endif %}
   </div>
+
+  {% if hay_panel %}
+  <div class="rejilla cuatro" aria-label="Resumen">
+    {% if perms.inventario.view_producto %}
+    <a class="tarjeta indicador {% if bajo_minimo %}alerta{% else %}ok{% endif %}" href="{% url 'producto_lista' %}?bajo_minimo=1">
+      <span class="etiqueta-cifra">Productos bajo mínimo</span>
+      <span class="cifra{% if bajo_minimo %} alerta{% endif %}">{{ bajo_minimo }}</span>
+      <span class="detalle">{% if bajo_minimo %}Ver la lista y reponer{% else %}Todo sobre el mínimo{% endif %}</span>
+    </a>
+    {% endif %}
+    {% if perms.inventario.view_movimiento %}
+    <div class="tarjeta indicador">
+      <span class="etiqueta-cifra">Entradas de hoy</span>
+      <span class="cifra">{{ entradas_hoy }}</span>
+      <span class="detalle">{{ unidades_entradas_hoy|cantidad }} unidades</span>
+    </div>
+    <div class="tarjeta indicador">
+      <span class="etiqueta-cifra">Salidas de hoy</span>
+      <span class="cifra">{{ salidas_hoy }}</span>
+      <span class="detalle">{{ unidades_salidas_hoy|cantidad }} unidades</span>
+    </div>
+    {% endif %}
+    {% if perms.inventario.view_producto %}
+    <div class="tarjeta indicador">
+      <span class="etiqueta-cifra">Valor del inventario a costo</span>
+      <span class="cifra">{% if valor_inventario is None %}—{% else %}{{ valor_inventario|pesos }}{% endif %}</span>
+      <span class="detalle">{% if sin_costo %}{{ sin_costo }} producto{{ sin_costo|pluralize }} sin costo{% else %}Stock × costo de cada producto{% endif %}</span>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if perms.inventario.view_movimiento %}
+  <h2>Últimos movimientos</h2>
+  {% if ultimos %}
+  <div class="tabla-scroll">
+    <table>
+      <thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th class="num">Cantidad</th><th>Usuario</th></tr></thead>
+      <tbody>
+      {% for m in ultimos %}
+        <tr>
+          <td>{{ m.fecha|date:"d-m-Y H:i" }}</td>
+          <td><a href="{% url 'kardex' m.producto_id %}"><span class="mono">{{ m.producto.sku }}</span></a> {{ m.producto.nombre }}</td>
+          <td>{{ m.get_tipo_display }}</td>
+          <td class="num">{{ m.cantidad|cl }}</td>
+          <td>{{ m.usuario.get_username }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="vacio"><p>Aún no hay movimientos de stock.</p>{% if perms.inventario.view_producto %}<a class="boton" href="{% url 'producto_lista' %}">Ir a productos</a>{% endif %}</div>
+  {% endif %}
+  {% endif %}
+
+  <h2>Accesos</h2>
   <div class="accesos">
     {% if perms.inventario.view_producto %}<a class="acceso" href="{% url 'producto_lista' %}"><strong>Productos</strong><span>Buscar por cualquier código, ver el stock y el kardex</span></a>{% endif %}
     {% if perms.inventario.view_proveedor %}<a class="acceso" href="{% url 'proveedor_lista' %}"><strong>Proveedores</strong><span>Datos y códigos de cada proveedor</span></a>{% endif %}
     {% if perms.inventario.view_categoria %}<a class="acceso" href="{% url 'categoria_lista' %}"><strong>Categorías</strong><span>Agrupar y filtrar el catálogo</span></a>{% endif %}
     {% if perms.inventario.importar_eleventa %}<a class="acceso" href="{% url 'importar_eleventa' %}"><strong>Importar desde Eleventa</strong><span>Carga inicial del catálogo con vista previa</span></a>{% endif %}
   </div>
-  {% if not perms.inventario.view_producto %}<p class="vacio">Tu cuenta aún no tiene un perfil asignado. Pide a la persona administradora que te asigne uno.</p>{% endif %}
+  {% if not perms.inventario.view_producto %}<div class="vacio"><p>Tu cuenta aún no tiene un perfil asignado. Pide a la persona administradora que te asigne uno.</p></div>{% endif %}
 {% endblock %}

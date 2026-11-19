@@ -50,9 +50,19 @@ class ProveedorForm(_NombreUnicoMixin, forms.ModelForm):
         return normalizar_nombre(self.cleaned_data.get("contacto"))
 
 
+def _numerico(campo):
+    """Campo numerico sin flechitas del navegador: texto con teclado decimal, alineado a la derecha."""
+    if isinstance(campo.widget, forms.NumberInput):
+        campo.widget = forms.TextInput()
+    campo.widget.attrs.update({"inputmode": "decimal", "autocomplete": "off"})
+    return campo
+
+
 class _ProductoBaseForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        for nombre in ("costo", "precio_venta", "precio_mayoreo", "stock_min", "stock_max"):
+            _numerico(self.fields[nombre])
         # Los precios son opcionales: vacio = 0.
         for campo in ("precio_venta", "precio_mayoreo"):
             self.fields[campo].required = False
@@ -203,7 +213,7 @@ class _MovimientoForm(forms.Form):
 
 def _cantidad(label, **kw):
     # localize=True: acepta «2,5» (coma) ademas de «2.5».
-    return forms.DecimalField(label=label, max_digits=12, decimal_places=2, localize=True, **kw)
+    return _numerico(forms.DecimalField(label=label, max_digits=12, decimal_places=2, localize=True, **kw))
 
 
 class SalidaForm(_MovimientoForm):
@@ -215,10 +225,10 @@ class EntradaForm(_MovimientoForm):
     """Mercaderia que llega. Proveedor y numero de factura/guia son opcionales."""
 
     cantidad = _cantidad("Cantidad que llega", min_value=0.01)
-    costo_unitario = forms.DecimalField(
+    costo_unitario = _numerico(forms.DecimalField(
         label="Costo unitario (opcional)", required=False, max_digits=14, decimal_places=2,
         min_value=0, localize=True,
-    )
+    ))
     proveedor = forms.ModelChoiceField(label="Proveedor (opcional)", queryset=Proveedor.objects.order_by("nombre"),
                                        required=False, empty_label="- Sin proveedor -")
     numero = forms.CharField(label="Número de factura o guía (opcional)", required=False, max_length=50)

@@ -54,7 +54,7 @@ def test_las_dos_secciones_son_details_cerrados_con_el_conteo(adm, prod):
 
 def test_las_secciones_usan_las_clases_del_historial_y_no_necesitan_js(adm, prod):
     t = html(adm.get(reverse("producto_detalle", args=[prod.pk])))
-    assert t.count('<details class="tarjeta historial"') == 2 and "<script" not in t
+    assert t.count('<details class="tarjeta historial"') == 2 and all("sistema.js" in x for x in re.findall(r"<script[^>]*>", t))
 
 
 def test_conteo_en_cero_y_actualizado(adm):

@@ -1,5 +1,7 @@
 from django.shortcuts import render
 
+from inventario.panel import panel_del_dia
+
 PERFILES = ("Administrador", "Operador")
 
 
@@ -16,4 +18,4 @@ def perfil_de(usuario):
 
 def inicio(request):
     # Protegida por LoginRequiredMiddleware (todo lo nuevo lo está por defecto).
-    return render(request, "inicio.html", {"perfil": perfil_de(request.user)})
+    return render(request, "inicio.html", {"perfil": perfil_de(request.user), **panel_del_dia(request.user)})

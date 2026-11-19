@@ -1,0 +1,10 @@
+<div class="campo{% if campo.errors %} con-error{% endif %}{% if ancho %} ancho{% endif %}">
+  <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
+  <div class="entrada{% if prefijo %} con-prefijo{% endif %}{% if sufijo %} con-sufijo{% endif %}">
+    {% if prefijo %}<span class="prefijo" aria-hidden="true">{{ prefijo }}</span>{% endif %}
+    {{ campo }}
+    {% if sufijo %}<span class="sufijo"{% if sufijo_unidad %} data-sufijo-unidad{% endif %}>{{ sufijo }}</span>{% endif %}
+  </div>
+  {% if campo.help_text %}<div class="ayuda">{{ campo.help_text }}</div>{% endif %}
+  {{ campo.errors }}
+</div>

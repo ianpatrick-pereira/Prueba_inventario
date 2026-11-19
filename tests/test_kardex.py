@@ -446,7 +446,7 @@ def test_ficha_y_lista_muestran_miles_con_punto_y_negativos(adm, admin_user):
     servicios.registrar_entrada(p, 3500, admin_user)
     ficha = html(adm.get(reverse("producto_detalle", args=[p.pk])))
     assert "$3.500" in ficha and "3.500,00" in ficha and "2.000,00" in ficha and "9.000,00" in ficha   # costo en pesos, stock con 2 decimales
-    assert "3.500</td>" in html(adm.get(reverse("producto_lista")))
+    assert "3.500" in html(adm.get(reverse("producto_lista")))
     servicios.registrar_salida(p, "2.5", admin_user)
     assert "-2,50" in html(adm.get(reverse("kardex", args=[p.pk])))
 

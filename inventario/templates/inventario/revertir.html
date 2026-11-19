@@ -20,13 +20,7 @@
     {% csrf_token %}
     {{ form.token }}
     {{ form.non_field_errors }}
-    {% for campo in form.visible_fields %}
-      <div class="campo{% if campo.errors %} con-error{% endif %}">
-        <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
-        {{ campo }}
-        {{ campo.errors }}
-      </div>
-    {% endfor %}
+    {% include "inventario/_campo.html" with campo=form.motivo %}
     <div class="acciones">
       <button type="submit" class="peligro">Revertir</button>
       <a class="boton secundario" href="{% url 'kardex' producto.pk %}">Cancelar</a>

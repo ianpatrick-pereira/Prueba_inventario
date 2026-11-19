@@ -3,13 +3,14 @@
 {% block contenido %}
   <div class="cabecera-pagina">
     <h1>Proveedores</h1>
-    {% if perms.inventario.add_proveedor %}<a class="boton secundario" href="{% url 'proveedor_nuevo' %}">Nuevo proveedor</a>{% endif %}
+    {% if perms.inventario.add_proveedor %}<div class="barra"><a class="boton" href="{% url 'proveedor_nuevo' %}">+ Nuevo proveedor</a></div>{% endif %}
   </div>
-  <form method="get" class="barra" role="search">
+  <form method="get" class="herramientas" role="search">
     <div class="buscador">
       <input type="search" name="q" value="{{ q }}" placeholder="Nombre o RUT" autofocus aria-label="Buscar proveedores">
       <button type="submit">Buscar</button>
     </div>
+    <span class="pista">Presiona <kbd>/</kbd> para buscar</span>
     {% if q %}<a class="boton secundario" href="{% url 'proveedor_lista' %}">Limpiar</a>{% endif %}
   </form>
   {% if proveedores %}
@@ -29,5 +30,10 @@
     {% if page_obj.has_next %}<a href="?q={{ q|urlencode }}&amp;page={{ page_obj.next_page_number }}">Siguiente</a>{% endif %}
   </nav>
   {% endif %}
-  {% else %}<p class="vacio">{% if q %}No se encontraron proveedores.{% else %}Aún no hay proveedores.{% endif %}</p>{% endif %}
+  {% else %}
+    <div class="vacio">
+      <p>{% if q %}No se encontraron proveedores.{% else %}Aún no hay proveedores.{% endif %}</p>
+      {% if perms.inventario.add_proveedor and not q %}<a class="boton" href="{% url 'proveedor_nuevo' %}">+ Agregar el primer proveedor</a>{% endif %}
+    </div>
+  {% endif %}
 {% endblock %}

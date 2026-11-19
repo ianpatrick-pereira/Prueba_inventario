@@ -56,7 +56,9 @@ def test_ninguna_plantilla_tiene_estilo_en_linea_ni_urls_externas():
         t = p.read_text(encoding="utf-8")
         assert "<style" not in t, p
         assert not re.search(r"https?://", t), p
-        assert "<script" not in t and "onchange=" not in t and "onclick=" not in t, p
+        assert "onchange=" not in t and "onclick=" not in t, p
+        scripts = re.findall(r"<script[^>]*>", t)          # D-58: solo UN script propio, local y con defer
+        assert all("{% static 'js/sistema.js' %}" in x and "defer" in x for x in scripts), p
 
 
 def test_la_pagina_renderizada_enlaza_el_css_local(adm):
@@ -165,9 +167,9 @@ def test_inicio_tiene_accesos_grandes_segun_permisos(adm, client):
 
 def test_el_menu_marca_la_pagina_actual(adm):
     t = html(adm.get(reverse("producto_lista")))
-    assert re.search(r'href="/productos/" aria-current="page">Productos', t)
-    assert 'aria-current="page">Proveedores' not in t
-    assert 'aria-current="page">Categorías' in html(adm.get(reverse("categoria_lista")))
+    assert re.search(r'href="/productos/" aria-current="page">.*?<span>Productos</span>', t)
+    assert re.search(r'aria-current="page">.*?<span>Proveedores</span>', t) is None
+    assert re.search(r'aria-current="page">.*?<span>Categorías</span>', html(adm.get(reverse("categoria_lista"))))
 
 
 # ------------------------------------------------------------------ precio en la lista
@@ -179,7 +181,8 @@ def test_lista_muestra_precio_venta_en_pesos_al_final_de_la_fila(adm):
     t = html(adm.get(reverse("producto_lista")))
     assert "Precio venta" in t and "$5.990" in t
     cab = ["Código", "Nombre", "Categoría", "Stock", "Mínimo", "Precio venta"]
-    assert re.findall(r"<th[^>]*>([^<]+)</th>", t) == cab                # mismo orden que el diseño «Taller»
+    assert re.findall(r"<th(?![^>]*solo-impresion)[^>]*>([^<]+)</th>", t) == cab      # columnas en pantalla (diseño «Taller»)
+    assert re.findall(r'<th class="num solo-impresion">([^<]+)</th>', t) == ["Máximo", "Sugerido"]   # solo al imprimir
     ficha = html(adm.get(reverse("producto_detalle", args=[p.pk])))
     assert "$3.500" in ficha and "$5.990" in ficha and "$5.000" in ficha and "Precios" in ficha
 
@@ -232,7 +235,7 @@ def test_filtro_por_categoria_combinado_con_busqueda(adm, surtido):
 def test_filtro_sin_categoria(adm, surtido):
     r = adm.get(reverse("producto_lista"), {"categoria": "ninguna"})
     assert skus(r) == ["SC1"]
-    assert 'value="ninguna" selected' in html(r)
+    assert '<a class="chip" href="?categoria=ninguna" aria-current="true">Sin categoría</a>' in html(r)
 
 
 def test_paginacion_conserva_busqueda_y_categoria(adm):
@@ -261,8 +264,9 @@ def test_categoria_invalida_o_inexistente_avisa_y_no_filtra_sin_500(adm, surtido
 def test_selector_de_categoria_en_la_lista(adm, surtido):
     a, b = surtido
     t = html(adm.get(reverse("producto_lista"), {"categoria": b.pk}))
-    assert 'name="categoria"' in t and "Todas" in t and "Sin categoría" in t
-    assert f'<option value="{b.pk}" selected>Filtros</option>' in t and f'<option value="{a.pk}">Aceites</option>' in t
+    assert 'aria-label="Filtrar por categoría"' in t and ">Todas</a>" in t and ">Sin categoría</a>" in t
+    assert f'<a class="chip" href="?categoria={b.pk}" aria-current="true">Filtros</a>' in t
+    assert f'<a class="chip" href="?categoria={a.pk}">Aceites</a>' in t and "<select" not in t
 
 
 def test_lista_de_categorias_con_conteo_y_enlaces(adm, surtido):
@@ -315,7 +319,7 @@ def test_barra_lateral_con_menu_usuario_y_cierre_de_sesion_por_post(adm):
     t = html(adm.get(reverse("producto_lista")))
     assert '<body class="con-lateral">' in t and '<aside class="lateral">' in t
     lateral = t.split('<aside class="lateral">')[1].split("</aside>")[0]
-    assert "Inventario" in lateral and "adm" in lateral and 'aria-current="page">Productos' in lateral
+    assert "Inventario" in lateral and "adm" in lateral and re.search(r'aria-current="page">.*?<span>Productos</span>', lateral)
     assert 'method="post" action="/cuentas/logout/"' in lateral and "csrfmiddlewaretoken" in lateral
 
 
