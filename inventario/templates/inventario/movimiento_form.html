@@ -23,6 +23,7 @@
         {{ campo.errors }}
       </div>
     {% endfor %}
+    {% if ayuda %}<p class="ayuda">{{ ayuda }}</p>{% endif %}
     <p class="ayuda">La fecha y hora del movimiento son siempre las de ahora.</p>
     <div class="acciones">
       <button type="submit" class="grande">Guardar</button>

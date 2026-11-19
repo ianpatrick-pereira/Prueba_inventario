@@ -217,82 +217,46 @@ def test_salida_cantidad_invalida_es_error_de_campo_no_500(op, prod, cantidad):
 def test_sin_permiso_403_en_todas_las_pantallas_de_movimientos(client, prod, admin_user):
     e = servicios.registrar_entrada(prod, 5, admin_user)
     client.force_login(crear_usuario("sin"))
-    for nombre, args in (("kardex", [prod.pk]), ("salida", [prod.pk]), ("ajuste", [prod.pk]),
-                         ("conteo", [prod.pk]), ("movimiento_revertir", [e.pk])):
+    for nombre, args in (("kardex", [prod.pk]), ("salida", [prod.pk]), ("entrada", [prod.pk]),
+                         ("corregir", [prod.pk]), ("movimiento_revertir", [e.pk])):
         url = reverse(nombre, args=args)
         assert client.get(url).status_code == 403, nombre
         assert client.post(url, {"token": "x", "cantidad": "1", "motivo": "m"}).status_code == 403, nombre
 
 
 def test_anonimo_va_al_login(client, prod):
-    for nombre in ("kardex", "salida", "ajuste", "conteo"):
+    for nombre in ("kardex", "salida", "entrada", "corregir"):
         assert client.get(reverse(nombre, args=[prod.pk])).status_code == 302
 
 
 # ------------------------------------------------------------------ 4. ajuste
-def test_ajuste_exige_motivo(adm, prod):
-    r = enviar(adm, "ajuste", prod, {"cantidad": "2", "motivo": ""})
-    assert r.status_code == 200 and "motivo" in r.context["form"].errors
-    r = enviar(adm, "ajuste", prod, {"cantidad": "2", "motivo": "   "})
-    assert r.status_code == 200 and "motivo" in r.context["form"].errors
-    assert Movimiento.objects.count() == 0
-
-
-def test_ajuste_cero_rechazado(adm, prod):
-    r = enviar(adm, "ajuste", prod, {"cantidad": "0", "motivo": "x"})
-    assert r.status_code == 200 and "cantidad" in r.context["form"].errors
-
-
-def test_operador_no_puede_ajustar_ni_por_post_directo(op, prod):
-    url = reverse("ajuste", args=[prod.pk])
-    assert op.get(url).status_code == 403
-    assert op.post(url, {"token": "x", "cantidad": "5", "motivo": "m"}).status_code == 403
-    assert Movimiento.objects.count() == 0
-    t = html(op.get(reverse("producto_detalle", args=[prod.pk])))
-    assert "/ajuste/" not in t and "/conteo/" not in t and "/salida/" in t
-
-
-def test_administrador_ajusta_con_signo(adm, admin_user, prod):
-    enviar(adm, "ajuste", prod, {"cantidad": "4", "motivo": "sobrante"})
-    enviar(adm, "ajuste", prod, {"cantidad": "-1,5", "motivo": "merma"})
-    assert servicios.stock_de(prod) == D("2.50")
-    assert set(Movimiento.objects.values_list("usuario__username", flat=True)) == {"adm"}
-
-
-def test_ajuste_que_deja_negativo_muestra_mensaje_sin_movimiento(adm, admin_user, prod):
-    servicios.registrar_entrada(prod, 2, admin_user)
-    r = enviar(adm, "ajuste", prod, {"cantidad": "-5", "motivo": "merma"})
-    assert r.status_code == 200 and "Stock insuficiente: hay 2,00 y se pide 5,00." in html(r)
-    assert Movimiento.objects.filter(tipo="ajuste").count() == 0
-
-
 # ------------------------------------------------------------------ 5. conteo
 def test_conteo_muestra_stock_actual_y_diferencia(adm, admin_user, prod):
     servicios.registrar_entrada(prod, 10, admin_user)
-    assert "10,00" in html(adm.get(reverse("conteo", args=[prod.pk])))
-    r = enviar(adm, "conteo", prod, {"cantidad": "12", "motivo": "conteo de enero"})
+    assert "10,00" in html(adm.get(reverse("corregir", args=[prod.pk])))
+    r = enviar(adm, "corregir", prod, {"cantidad": "12", "motivo": "conteo de enero"})
     assert servicios.stock_de(prod) == D("12.00")
     assert "diferencia aplicada de 2,00" in html(adm.get(r.url))
-    r = enviar(adm, "conteo", prod, {"cantidad": "7,5", "motivo": "conteo"})
+    r = enviar(adm, "corregir", prod, {"cantidad": "7,5", "motivo": "corregir"})
     assert servicios.stock_de(prod) == D("7.50")
     assert "diferencia aplicada de -4,50" in html(adm.get(r.url))
 
 
 def test_conteo_sin_diferencia_no_crea_movimiento(adm, admin_user, prod):
     servicios.registrar_entrada(prod, 10, admin_user)
-    r = enviar(adm, "conteo", prod, {"cantidad": "10", "motivo": "conteo"})
+    r = enviar(adm, "corregir", prod, {"cantidad": "10", "motivo": "corregir"})
     assert Movimiento.objects.count() == 1
     assert "Sin diferencia" in html(adm.get(r.url))
 
 
 def test_conteo_exige_motivo_y_rechaza_negativo_y_operador_403(adm, prod, operador):
-    assert "motivo" in enviar(adm, "conteo", prod, {"cantidad": "3", "motivo": ""}).context["form"].errors
-    assert "cantidad" in enviar(adm, "conteo", prod, {"cantidad": "-1", "motivo": "x"}).context["form"].errors
+    assert "motivo" in enviar(adm, "corregir", prod, {"cantidad": "3", "motivo": ""}).context["form"].errors
+    assert "cantidad" in enviar(adm, "corregir", prod, {"cantidad": "-1", "motivo": "x"}).context["form"].errors
     assert Movimiento.objects.count() == 0
     c2 = Client()
     c2.force_login(operador)
-    assert c2.get(reverse("conteo", args=[prod.pk])).status_code == 403
-    assert c2.post(reverse("conteo", args=[prod.pk]), {"token": "x", "cantidad": "1", "motivo": "m"}).status_code == 403
+    assert c2.get(reverse("corregir", args=[prod.pk])).status_code == 403
+    assert c2.post(reverse("corregir", args=[prod.pk]), {"token": "x", "cantidad": "1", "motivo": "m"}).status_code == 403
 
 
 # ------------------------------------------------------------------ 6. revertir
@@ -351,13 +315,13 @@ def _casos(prod, admin_user):
     e = servicios.registrar_entrada(prod, 1, admin_user)
     return {
         "salida": (reverse("salida", args=[prod.pk]), {"cantidad": "1", "motivo": ""}, "salida"),
-        "ajuste": (reverse("ajuste", args=[prod.pk]), {"cantidad": "1", "motivo": "m"}, "ajuste"),
-        "conteo": (reverse("conteo", args=[prod.pk]), {"cantidad": "70", "motivo": "m"}, "ajuste"),
+        "entrada": (reverse("entrada", args=[prod.pk]), {"cantidad": "1", "motivo": "m"}, "entrada"),
+        "corregir": (reverse("corregir", args=[prod.pk]), {"cantidad": "70", "motivo": "m"}, "ajuste"),
         "reversa": (reverse("movimiento_revertir", args=[e.pk]), {"motivo": "m"}, "ajuste"),
     }
 
 
-@pytest.mark.parametrize("caso", ["salida", "ajuste", "conteo", "reversa"])
+@pytest.mark.parametrize("caso", ["salida", "entrada", "corregir", "reversa"])
 def test_mismo_token_dos_veces_registra_un_solo_movimiento(adm, admin_user, prod, caso):
     url, datos, tipo = _casos(prod, admin_user)[caso]
     n = Movimiento.objects.count()
@@ -370,7 +334,7 @@ def test_mismo_token_dos_veces_registra_un_solo_movimiento(adm, admin_user, prod
     assert "no se registró nada nuevo" in html(r2)
 
 
-@pytest.mark.parametrize("caso", ["salida", "ajuste", "conteo", "reversa"])
+@pytest.mark.parametrize("caso", ["salida", "entrada", "corregir", "reversa"])
 def test_token_inexistente_o_de_otra_sesion_se_rechaza(adm, admin_user, prod, caso):
     url, datos, _ = _casos(prod, admin_user)[caso]
     n = Movimiento.objects.count()
@@ -388,8 +352,8 @@ def test_token_inexistente_o_de_otra_sesion_se_rechaza(adm, admin_user, prod, ca
 def test_token_de_otro_formulario_no_sirve(adm, admin_user, prod):
     servicios.registrar_entrada(prod, 10, admin_user)
     token_salida = token_de(adm.get(reverse("salida", args=[prod.pk])))
-    r = adm.post(reverse("ajuste", args=[prod.pk]), {"token": token_salida, "cantidad": "1", "motivo": "m"}, follow=True)
-    assert "no se registró nada nuevo" in html(r) and Movimiento.objects.filter(tipo="ajuste").count() == 0
+    r = adm.post(reverse("entrada", args=[prod.pk]), {"token": token_salida, "cantidad": "1", "motivo": "m"}, follow=True)
+    assert "no se registró nada nuevo" in html(r) and Movimiento.objects.filter(tipo="entrada").count() == 1
 
 
 def test_formulario_invalido_conserva_el_token(adm, admin_user, prod):
@@ -437,17 +401,18 @@ def test_campo_fecha_enviado_por_post_se_ignora(adm, admin_user, prod):
     servicios.registrar_entrada(prod, 20, admin_user)
     antes = timezone.now()
     enviar(adm, "salida", prod, {"cantidad": "1", "motivo": "", "fecha": "2020-01-01 10:00:00"})
-    enviar(adm, "ajuste", prod, {"cantidad": "1", "motivo": "m", "fecha": "2020-01-01"})
-    enviar(adm, "conteo", prod, {"cantidad": "5", "motivo": "m", "fecha": "2020-01-01"})
-    for m in Movimiento.objects.exclude(tipo="entrada"):
-        assert antes <= m.fecha <= timezone.now() and m.fecha.year >= 2026
+    enviar(adm, "entrada", prod, {"cantidad": "1", "motivo": "m", "fecha": "2020-01-01"})
+    enviar(adm, "corregir", prod, {"cantidad": "5", "motivo": "m", "fecha": "2020-01-01"})
+    assert Movimiento.objects.count() == 4                              # entrada inicial + 3 por pantalla
+    for m in Movimiento.objects.all():
+        assert antes - dt.timedelta(seconds=5) <= m.fecha <= timezone.now() and m.fecha.year >= 2026
     assert 'name="fecha"' not in html(adm.get(reverse("salida", args=[prod.pk])))
 
 
 # ------------------------------------------------------------------ 9. nunca permitir_negativo
 def test_ninguna_pantalla_pasa_permitir_negativo(adm, admin_user, prod, monkeypatch):
     llamadas = []
-    for nombre in ("registrar_salida", "registrar_ajuste", "ajustar_a_conteo", "revertir"):
+    for nombre in ("registrar_salida", "registrar_entrada", "ajustar_a_conteo", "revertir"):
         real = getattr(servicios, nombre)
 
         def espia(*a, _real=real, _n=nombre, **k):
@@ -456,12 +421,13 @@ def test_ninguna_pantalla_pasa_permitir_negativo(adm, admin_user, prod, monkeypa
 
         monkeypatch.setattr(servicios, nombre, espia)
     e = servicios.registrar_entrada(prod, 20, admin_user)
+    llamadas.clear()
     enviar(adm, "salida", prod, {"cantidad": "1", "motivo": ""})
-    enviar(adm, "ajuste", prod, {"cantidad": "1", "motivo": "m"})
-    enviar(adm, "conteo", prod, {"cantidad": "30", "motivo": "m"})
+    enviar(adm, "entrada", prod, {"cantidad": "1", "motivo": "m"})
+    enviar(adm, "corregir", prod, {"cantidad": "30", "motivo": "m"})
     url = reverse("movimiento_revertir", args=[e.pk])
     adm.post(url, {"token": token_de(adm.get(url)), "motivo": "m"})
-    assert {n for n, _ in llamadas} == {"registrar_salida", "registrar_ajuste", "ajustar_a_conteo", "revertir"}
+    assert {n for n, _ in llamadas} == {"registrar_salida", "registrar_entrada", "ajustar_a_conteo", "revertir"}
     assert all(not k.get("permitir_negativo") for _, k in llamadas)
     assert Movimiento.objects.filter(tipo="salida", usuario=admin_user).exists()
 
@@ -488,7 +454,7 @@ def test_ficha_y_lista_muestran_miles_con_punto_y_negativos(adm, admin_user):
 # ------------------------------------------------------------------ 11. CSRF y XSS
 def test_csrf_en_todos_los_formularios(adm, admin_user, prod):
     e = servicios.registrar_entrada(prod, 5, admin_user)
-    for nombre, args in (("salida", [prod.pk]), ("ajuste", [prod.pk]), ("conteo", [prod.pk]),
+    for nombre, args in (("salida", [prod.pk]), ("entrada", [prod.pk]), ("corregir", [prod.pk]),
                          ("movimiento_revertir", [e.pk])):
         assert "csrfmiddlewaretoken" in html(adm.get(reverse(nombre, args=args))), nombre
 
@@ -513,11 +479,50 @@ def test_documento_y_usuario_en_el_kardex(adm, admin_user, prod):
     assert "V-77" in t and "adm" in t
 
 
-def test_ficha_muestra_enlaces_segun_permisos(adm, prod, operador):
+def test_ficha_solo_tiene_ver_kardex_sin_botones_de_movimiento(adm, prod, operador):
     t = html(adm.get(reverse("producto_detalle", args=[prod.pk])))
-    for ruta in ("/kardex/", "/salida/", "/ajuste/", "/conteo/"):
-        assert ruta in t
+    assert f"/productos/{prod.pk}/kardex/" in t and "Ver kardex" in t
+    for ruta in ("/salida/", "/entrada/", "/corregir/", "/conteo/", "/ajuste/"):
+        assert ruta not in t, ruta
+    for texto in ("Registrar salida", "Registrar entrada", "Corregir stock", "Ajuste", "Conteo"):
+        assert texto not in t, texto
     c2 = Client()
     c2.force_login(operador)
     t2 = html(c2.get(reverse("producto_detalle", args=[prod.pk])))
-    assert "/kardex/" in t2 and "/salida/" in t2 and "/ajuste/" not in t2
+    assert "/kardex/" in t2 and "/salida/" not in t2 and "/entrada/" not in t2
+
+
+def test_el_kardex_muestra_los_botones_de_movimiento_segun_permisos(adm, prod, operador):
+    t = html(adm.get(reverse("kardex", args=[prod.pk])))
+    assert all(f"/productos/{prod.pk}/{r}/" in t for r in ("entrada", "salida", "corregir"))
+    assert "Registrar entrada" in t and "Registrar salida" in t and "Corregir stock" in t
+    c2 = Client()
+    c2.force_login(operador)
+    t2 = html(c2.get(reverse("kardex", args=[prod.pk])))
+    assert "Registrar entrada" in t2 and "Registrar salida" in t2 and "Corregir stock" not in t2
+    assert f"/productos/{prod.pk}/corregir/" not in t2
+
+
+def test_la_pantalla_de_ajuste_ya_no_existe_ni_hay_enlaces_a_ella(adm, admin_user, prod):
+    assert adm.get(f"/productos/{prod.pk}/ajuste/").status_code == 404
+    assert adm.post(f"/productos/{prod.pk}/ajuste/", {"cantidad": "1", "motivo": "x"}).status_code == 404
+    for url in ("/", reverse("producto_lista"), reverse("producto_detalle", args=[prod.pk]),
+                reverse("kardex", args=[prod.pk]), reverse("corregir", args=[prod.pk]), reverse("entrada", args=[prod.pk])):
+        assert "/ajuste/" not in html(adm.get(url)), url
+    assert Movimiento.objects.count() == 0
+
+
+def test_la_url_antigua_de_conteo_redirige_a_corregir(adm, prod):
+    r = adm.get(f"/productos/{prod.pk}/conteo/")
+    assert r.status_code == 301 and r.url == reverse("corregir", args=[prod.pk])
+    assert "Corregir stock" in html(adm.get(r.url)) and "¿Cuántas unidades hay ahora en la bodega?" in html(adm.get(r.url))
+
+
+# ------------------------------------------------------------------ D-54: Corregir stock
+def test_corregir_stock_registra_la_diferencia_como_ajuste(adm, admin_user, prod):
+    servicios.registrar_entrada(prod, 10, admin_user)
+    assert "Escribe lo que hay en la bodega" in html(adm.get(reverse("corregir", args=[prod.pk])))
+    enviar(adm, "corregir", prod, {"cantidad": "7", "motivo": "conteo de bodega"})
+    m = Movimiento.objects.latest("pk")
+    assert m.tipo == "ajuste" and m.cantidad == D("-3.00") and m.motivo == "conteo de bodega"
+    assert servicios.stock_de(prod) == D("7.00")

@@ -1,4 +1,5 @@
 from django.urls import path
+from django.views.generic import RedirectView
 
 from . import views
 
@@ -15,8 +16,10 @@ urlpatterns = [
          name="codigo_proveedor_quitar"),
     path("productos/<int:pk>/kardex/", views.Kardex.as_view(), name="kardex"),
     path("productos/<int:pk>/salida/", views.Salida.as_view(), name="salida"),
-    path("productos/<int:pk>/ajuste/", views.Ajuste.as_view(), name="ajuste"),
-    path("productos/<int:pk>/conteo/", views.Conteo.as_view(), name="conteo"),
+    path("productos/<int:pk>/entrada/", views.Entrada.as_view(), name="entrada"),
+    path("productos/<int:pk>/corregir/", views.Conteo.as_view(), name="corregir"),
+    # el nombre antiguo sigue funcionando (marcadores del navegador)
+    path("productos/<int:pk>/conteo/", RedirectView.as_view(pattern_name="corregir", permanent=True), name="conteo"),
     path("movimientos/<int:pk>/revertir/", views.Revertir.as_view(), name="movimiento_revertir"),
     path("importar/eleventa/", views.ImportarSubir.as_view(), name="importar_eleventa"),
     path("importar/eleventa/<int:pk>/", views.ImportarVistaPrevia.as_view(), name="importar_vista_previa"),
