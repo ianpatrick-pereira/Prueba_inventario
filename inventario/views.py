@@ -452,3 +452,118 @@ class Revertir(_FormularioMovimiento):
     def ejecutar(self, request, m, d):
         servicios.revertir(m, request.user, d["motivo"])
         return f"Movimiento revertido: el stock de {m.producto.sku} volvió a lo que era antes."
+
+
+# ---------------------------------------------------------------- importacion desde Eleventa (T-F1-08)
+from django.core.files.base import ContentFile  # noqa: E402
+from django.core.paginator import Paginator as _Paginator  # noqa: E402
+from django.db import IntegrityError  # noqa: E402
+
+from . import importar_eleventa  # noqa: E402
+from .forms import SubirEleventaForm  # noqa: E402
+from .models import ImportacionEleventa  # noqa: E402
+
+
+class _ImportarBase(Permiso):
+    permission_required = "inventario.importar_eleventa"
+
+
+class ImportarSubir(_ImportarBase, View):
+    template_name = "inventario/importar_subir.html"
+
+    def get(self, request):
+        return render(request, self.template_name, {"form": SubirEleventaForm()})
+
+    def post(self, request):
+        form = SubirEleventaForm(request.POST, request.FILES)
+        if not form.is_valid():
+            return render(request, self.template_name, {"form": form})
+        contenido = form.contenido
+        huella = importar_eleventa.sha256(contenido)
+        previa = ImportacionEleventa.objects.filter(hash_sha256=huella).first()
+        if previa and previa.estado == ImportacionEleventa.CONFIRMADA:
+            form.add_error("archivo", f"Este archivo ya fue importado el {timezone.localtime(previa.fecha):%d-%m-%Y %H:%M}.")
+            return render(request, self.template_name, {"form": form})
+        if previa and previa.estado == ImportacionEleventa.VISTA_PREVIA:
+            messages.info(request, "Este archivo ya estaba subido: continúa desde su vista previa.")
+            return redirect("importar_vista_previa", pk=previa.pk)
+        if previa:  # descartada: se reemplaza por una nueva vista previa
+            previa.archivo.delete(save=False)
+            previa.delete()
+        nombre = (request.FILES["archivo"].name or "archivo").replace("\\", "/").rsplit("/", 1)[-1][:255]
+        imp = ImportacionEleventa(usuario=request.user, hash_sha256=huella, nombre_original=nombre,
+                                  analisis=form.analisis.a_json())
+        imp.archivo.save(nombre, ContentFile(contenido), save=False)
+        try:
+            imp.save()
+        except IntegrityError:
+            imp.archivo.delete(save=False)
+            form.add_error("archivo", "Este archivo ya fue subido por otra persona; reintenta.")
+            return render(request, self.template_name, {"form": form})
+        return redirect("importar_vista_previa", pk=imp.pk)
+
+
+class ImportarVistaPrevia(_ImportarBase, View):
+    template_name = "inventario/importar_vista_previa.html"
+
+    def _cargar(self, pk):
+        return get_object_or_404(ImportacionEleventa, pk=pk)
+
+    def get(self, request, pk):
+        imp = self._cargar(pk)
+        if imp.estado == ImportacionEleventa.CONFIRMADA:
+            return redirect("importar_resumen", pk=pk)
+        if imp.estado == ImportacionEleventa.DESCARTADA:
+            messages.info(request, "Esa importación fue descartada.")
+            return redirect("importar_eleventa")
+        try:
+            filas = importar_eleventa.cargar_analisis(imp)
+        except importar_eleventa.ArchivoInvalido as e:
+            messages.error(request, " ".join(e.messages))
+            return redirect("importar_eleventa")
+        vistos = [f.codigo for f in filas if f.estado == "existente"]
+        if imp.analisis and imp.analisis.get("existentes_vistos") != vistos:
+            # Lo que el usuario vio como «existente»: al confirmar se avisa si cambio.
+            imp.analisis["existentes_vistos"] = vistos
+            imp.save(update_fields=["analisis"])
+        pagina = _Paginator(filas, 100).get_page(request.GET.get("page"))
+        return render(request, self.template_name, {
+            "imp": imp, "resumen": importar_eleventa.resumir(filas), "pagina": pagina,
+            "omitidas": filas.omitidas,
+            "token": tokens.emitir(request, f"importar:{pk}"),
+        })
+
+    def post(self, request, pk):
+        self._cargar(pk)  # 404 si no existe
+        accion = request.POST.get("accion")
+        if not tokens.consumir(request, request.POST.get("token", ""), f"importar:{pk}"):
+            messages.warning(
+                request,
+                "Este formulario ya se había enviado (o venció): no se hizo nada nuevo. "
+                "Revisa el estado de la importación.",
+            )
+            return redirect("importar_vista_previa", pk=pk)
+        try:
+            if accion == "confirmar":
+                importar_eleventa.confirmar(
+                    pk, request.user, actualizar_existentes=request.POST.get("actualizar_existentes") == "on"
+                )
+                messages.success(request, "Importación confirmada.")
+                return redirect("importar_resumen", pk=pk)
+            if accion == "descartar":
+                importar_eleventa.descartar(pk, request.user)
+                messages.success(request, "Importación descartada: no se cambió nada.")
+                return redirect("importar_eleventa")
+        except ValidationError as e:
+            messages.error(request, "No se importó nada: " + " ".join(e.messages))
+            return redirect("importar_vista_previa", pk=pk)
+        messages.error(request, "Acción no válida.")
+        return redirect("importar_vista_previa", pk=pk)
+
+
+class ImportarResumen(_ImportarBase, View):
+    def get(self, request, pk):
+        imp = get_object_or_404(ImportacionEleventa.objects.select_related("documento", "usuario"), pk=pk)
+        if imp.estado != ImportacionEleventa.CONFIRMADA:
+            return redirect("importar_vista_previa", pk=pk)
+        return render(request, "inventario/importar_resumen.html", {"imp": imp, "r": imp.resumen})

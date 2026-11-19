@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block titulo %}Importar desde Eleventa - Sistema de inventario{% endblock %}
+{% block contenido %}
+  <h1>Carga inicial desde Eleventa</h1>
+  <div class="tarjeta">
+    <p>Sube la exportación de <strong>Inventario → Reporte de inventario → Exportar</strong>.
+       Primero verás una vista previa: nada se guarda hasta que confirmes.</p>
+    <p class="ayuda">Columnas obligatorias: Código, Descripción, Inventario. El archivo se guarda en el servidor y no se comparte.</p>
+  </div>
+  <form method="post" enctype="multipart/form-data" class="tarjeta">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <label for="{{ form.archivo.id_for_label }}">{{ form.archivo.label }}</label>
+    {{ form.archivo }}
+    {{ form.archivo.errors }}
+    <p><button type="submit">Subir y ver vista previa</button></p>
+  </form>
+{% endblock %}

@@ -41,7 +41,7 @@ from django.db.models import OuterRef, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
-from .models import Movimiento, Producto
+from .models import Documento, Movimiento, Producto
 
 CERO = Decimal("0")
 _CENTAVO = Decimal("0.01")
@@ -248,3 +248,44 @@ def revertir(movimiento, usuario, motivo, permitir_negativo=False):
         return _crear(producto, Movimiento.AJUSTE, -original.cantidad, usuario, motivo=motivo,
                       documento=original.documento, revierte=original,
                       permitir_negativo=permitir_negativo)
+
+
+MOTIVO_INVENTARIO_INICIAL = "Inventario inicial desde Eleventa"
+
+
+def registrar_inventario_inicial_en_lote(filas, usuario, documento):
+    """SOLO para la carga de INVENTARIO INICIAL (D-51): un ajuste por producto, en lote.
+    No es una via general para saltarse el control por movimiento.
+
+    `filas`: iterable de (producto, cantidad > 0). `documento`: None o de tipo inventario_inicial. Exige el permiso registrar_ajuste UNA vez
+    (D-39), verifica que ningun producto tenga movimientos previos (solo es para productos
+    recien creados), valida cada movimiento (Movimiento.objects.bulk_create ya lo hace) y
+    los inserta en lotes. No usa permitir_negativo. Devuelve los movimientos creados."""
+    _exigir_permiso(usuario, "registrar_ajuste")
+    if documento is not None and documento.tipo != Documento.INVENTARIO_INICIAL:
+        raise ValidationError({"documento": "El documento debe ser de tipo inventario inicial."})
+    filas = list(filas)
+    if not filas:
+        return []
+    ids = [p.pk for p, _ in filas]
+    if len(set(ids)) != len(ids):
+        raise ValidationError("Un producto aparece más de una vez en el inventario inicial.")
+    ahora = timezone.now()
+    movimientos = []
+    for producto, cantidad in filas:
+        c = _a_decimal(cantidad, "cantidad")
+        if c <= 0:
+            raise ValidationError({"cantidad": "La cantidad del inventario inicial debe ser mayor que cero."})
+        movimientos.append(Movimiento(
+            producto=producto, tipo=Movimiento.AJUSTE, cantidad=c, usuario=usuario,
+            documento=documento, motivo=MOTIVO_INVENTARIO_INICIAL, fecha=ahora,
+        ))
+    with transaction.atomic():
+        for i in range(0, len(ids), 500):
+            lote = ids[i:i + 500]
+            # Se bloquean los productos ANTES de mirar sus movimientos (nadie les agrega uno en medio).
+            if len(list(Producto.objects.select_for_update().filter(pk__in=lote).values_list("pk", flat=True))) != len(lote):
+                raise ValidationError("Un producto del inventario inicial ya no existe.")
+            if Movimiento.objects.filter(producto_id__in=lote).exists():
+                raise ValidationError("Un producto ya tiene movimientos: el inventario inicial solo se carga una vez.")
+        return Movimiento.objects.bulk_create(movimientos, batch_size=500)

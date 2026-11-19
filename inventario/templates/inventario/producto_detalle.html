@@ -17,6 +17,8 @@
       <tr><th>Categoría</th><td>{{ producto.categoria.nombre|default:"-" }}</td></tr>
       <tr><th>Unidad</th><td>{{ producto.unidad }}</td></tr>
       <tr><th>Costo de referencia</th><td>{{ producto.costo|cl }}</td></tr>
+      <tr><th>Precio de venta</th><td>{{ producto.precio_venta|cl }}</td></tr>
+      <tr><th>Precio mayoreo</th><td>{{ producto.precio_mayoreo|cl }}</td></tr>
       <tr><th>Stock actual</th><td><strong>{{ stock|cl }}</strong>{% if producto.stock_min > 0 and stock <= producto.stock_min %} <span class="etiqueta-bajo">(en o bajo el mínimo)</span>{% endif %}</td></tr>
       <tr><th>Stock mínimo / máximo</th><td>{{ producto.stock_min|cl }} / {{ producto.stock_max|cl }}</td></tr>
     </table>

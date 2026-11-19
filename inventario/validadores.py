@@ -49,3 +49,13 @@ def normalizar_rut(texto):
     if calcular_dv(cuerpo) != dv:
         raise ValidationError("El dígito verificador del RUT no es correcto.")
     return f"{cuerpo}-{dv}"
+
+
+_INICIOS_DE_FORMULA = ("=", "+", "-", "@", "\t", "\r")
+
+
+def neutralizar_para_planilla(texto):
+    """D-49: antepone «'» a un texto que una planilla (Excel) interpretaria como formula
+    (empieza con =, +, - o @). Se usara al EXPORTAR a planilla; los datos se guardan sin alterar."""
+    t = "" if texto is None else str(texto)
+    return f"'{t}" if t.startswith(_INICIOS_DE_FORMULA) else t
