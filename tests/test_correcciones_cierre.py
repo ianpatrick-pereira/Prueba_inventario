@@ -1,5 +1,6 @@
 """Correcciones de la auditoria de cierre de la fase 1 (T-F1-11)."""
 import datetime as dt
+from pathlib import Path
 from decimal import Decimal
 
 import pytest
@@ -223,7 +224,7 @@ def test_el_css_cubre_el_campo_de_contrasena_igual_que_el_de_usuario(client):
 
 # ------------------------------------------------------------------ 6. README
 def test_readme_tiene_la_seccion_operacion_segura():
-    t = open("README.md", encoding="utf-8").read()
+    t = (Path(__file__).resolve().parent.parent / "README.md").read_text(encoding="utf-8")
     assert "## Operación segura" in t
     for frase in ("No revertir migraciones con datos reales", "respaldo", "valores negativos",
                   "solo por migración", "Nunca marcar `is_staff` a un operador",
