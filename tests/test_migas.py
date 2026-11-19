@@ -7,7 +7,7 @@ from django.contrib.auth.models import Group
 from django.urls import reverse
 
 from inventario import servicios
-from inventario.models import Categoria, Movimiento, Producto
+from inventario.models import Categoria, Producto
 
 pytestmark = pytest.mark.django_db
 CLAVE = "Zq7-mPx2vL-prueba"
