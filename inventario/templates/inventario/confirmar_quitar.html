@@ -1,11 +1,13 @@
 {% extends "base.html" %}
 {% block titulo %}Quitar código - Sistema de inventario{% endblock %}
 {% block contenido %}
-  <h1>Quitar {{ tipo }}</h1>
-  <form method="post" class="tarjeta">
+  <div class="cabecera-pagina"><h1>Quitar {{ tipo }}</h1></div>
+  <form method="post" class="tarjeta form-angosto">
     {% csrf_token %}
-    <p>¿Seguro que quieres quitar el código <strong>{{ objeto }}</strong> del producto <strong>{{ objeto.producto }}</strong>?</p>
-    <p><button type="submit" class="peligro">Sí, quitar</button>
-      <a class="boton secundario" href="{% url 'producto_detalle' objeto.producto_id %}">Cancelar</a></p>
+    <p>¿Seguro que quieres quitar el código <strong class="mono">{{ objeto }}</strong> del producto <strong>{{ objeto.producto }}</strong>?</p>
+    <div class="acciones">
+      <button type="submit" class="peligro">Sí, quitar</button>
+      <a class="boton secundario" href="{% url 'producto_detalle' objeto.producto_id %}">Cancelar</a>
+    </div>
   </form>
 {% endblock %}

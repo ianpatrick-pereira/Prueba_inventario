@@ -1,27 +1,33 @@
 {% extends "base.html" %}
 {% block titulo %}Proveedores - Sistema de inventario{% endblock %}
 {% block contenido %}
-  <h1>Proveedores</h1>
-  <form method="get" class="barra" role="search">
-    <input type="search" name="q" value="{{ q }}" placeholder="Nombre o RUT" autofocus aria-label="Buscar">
-    <button type="submit">Buscar</button>
-    {% if q %}<a class="boton secundario" href="{% url 'proveedor_lista' %}">Limpiar</a>{% endif %}
+  <div class="cabecera-pagina">
+    <h1>Proveedores</h1>
     {% if perms.inventario.add_proveedor %}<a class="boton secundario" href="{% url 'proveedor_nuevo' %}">Nuevo proveedor</a>{% endif %}
+  </div>
+  <form method="get" class="barra" role="search">
+    <div class="buscador">
+      <input type="search" name="q" value="{{ q }}" placeholder="Nombre o RUT" autofocus aria-label="Buscar proveedores">
+      <button type="submit">Buscar</button>
+    </div>
+    {% if q %}<a class="boton secundario" href="{% url 'proveedor_lista' %}">Limpiar</a>{% endif %}
   </form>
   {% if proveedores %}
+  <div class="tabla-scroll">
   <table>
     <thead><tr><th>Nombre</th><th>RUT</th><th>Contacto</th><th></th></tr></thead>
     {% for p in proveedores %}
-    <tr><td>{{ p.nombre }}</td><td>{{ p.rut|default:"-" }}</td><td>{{ p.contacto|default:"-" }}</td>
-      <td>{% if perms.inventario.change_proveedor %}<a href="{% url 'proveedor_editar' p.pk %}">Editar</a>{% endif %}</td></tr>
+    <tr><td>{{ p.nombre }}</td><td class="mono">{{ p.rut|default:"-" }}</td><td>{{ p.contacto|default:"-" }}</td>
+      <td class="num">{% if perms.inventario.change_proveedor %}<a href="{% url 'proveedor_editar' p.pk %}">Editar</a>{% endif %}</td></tr>
     {% endfor %}
   </table>
+  </div>
   {% if is_paginated %}
-  <div class="paginas">
+  <nav class="paginas" aria-label="Páginas">
     {% if page_obj.has_previous %}<a href="?q={{ q|urlencode }}&amp;page={{ page_obj.previous_page_number }}">Anterior</a>{% endif %}
     <span>Página {{ page_obj.number }} de {{ paginator.num_pages }}</span>
     {% if page_obj.has_next %}<a href="?q={{ q|urlencode }}&amp;page={{ page_obj.next_page_number }}">Siguiente</a>{% endif %}
-  </div>
+  </nav>
   {% endif %}
   {% else %}<p class="vacio">{% if q %}No se encontraron proveedores.{% else %}Aún no hay proveedores.{% endif %}</p>{% endif %}
 {% endblock %}

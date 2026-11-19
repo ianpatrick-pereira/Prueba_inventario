@@ -1,17 +1,20 @@
 {% extends "base.html" %}
 {% block titulo %}Categorías - Sistema de inventario{% endblock %}
 {% block contenido %}
-  <h1>Categorías</h1>
-  <div class="barra">
+  <div class="cabecera-pagina">
+    <h1>Categorías</h1>
     {% if perms.inventario.add_categoria %}<a class="boton secundario" href="{% url 'categoria_nueva' %}">Nueva categoría</a>{% endif %}
   </div>
   {% if categorias %}
+  <div class="tabla-scroll">
   <table>
-    <thead><tr><th>Nombre</th><th></th></tr></thead>
+    <thead><tr><th>Nombre</th><th class="num">Productos</th><th></th></tr></thead>
     {% for c in categorias %}
-    <tr><td>{{ c.nombre }}</td>
-      <td>{% if perms.inventario.change_categoria %}<a href="{% url 'categoria_editar' c.pk %}">Editar</a>{% endif %}</td></tr>
+    <tr><td>{% if perms.inventario.view_producto %}<a href="{% url 'producto_lista' %}?categoria={{ c.pk }}">{{ c.nombre }}</a>{% else %}{{ c.nombre }}{% endif %}</td>
+      <td class="num">{{ c.n_productos }}</td>
+      <td class="num">{% if perms.inventario.change_categoria %}<a href="{% url 'categoria_editar' c.pk %}">Editar</a>{% endif %}</td></tr>
     {% endfor %}
   </table>
+  </div>
   {% else %}<p class="vacio">Aún no hay categorías.</p>{% endif %}
 {% endblock %}

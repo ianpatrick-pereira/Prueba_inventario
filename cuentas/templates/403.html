@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block titulo %}Sin permiso - Sistema de inventario{% endblock %}
+{% block contenido %}
+  <div class="pagina-error tarjeta">
+    <div class="codigo">403</div>
+    <h1>No tienes permiso para ver esto</h1>
+    <p>Tu perfil no incluye esta pantalla o esta acción. Si crees que es un error, pide a la persona administradora que revise tu perfil.</p>
+    <p><a class="boton" href="{% url 'inicio' %}">Volver al inicio</a></p>
+  </div>
+{% endblock %}

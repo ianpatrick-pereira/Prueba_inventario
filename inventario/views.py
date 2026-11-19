@@ -2,13 +2,14 @@
 sin permiso -> 403 y sin sesion -> login (LoginRequiredMiddleware)."""
 import datetime as _dt
 from decimal import Decimal
+from urllib.parse import urlencode
 
 from django import forms as _forms
 from django.contrib import messages
 from django.contrib.auth.mixins import PermissionRequiredMixin
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Case, IntegerField, Q, Sum, Value, When
+from django.db.models import Case, Count, IntegerField, Q, Sum, Value, When
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.urls import reverse, reverse_lazy
@@ -56,9 +57,31 @@ class ProductoLista(Permiso, ListView):
     context_object_name = "productos"
     paginate_by = 50
 
+    def _filtro_categoria(self):
+        """Lee ?categoria=<pk>|ninguna. Un valor invalido o inexistente no da error: avisa y no filtra."""
+        if hasattr(self, "_cat"):
+            return self._cat
+        self.categorias = list(Categoria.objects.order_by("nombre"))     # tambien alimenta el selector
+        crudo = (self.request.GET.get("categoria") or "").strip()
+        self._cat, self.aviso_categoria = None, ""
+        if crudo == "ninguna":
+            self._cat = "ninguna"
+        elif crudo:
+            validas = {str(c.pk) for c in self.categorias}
+            if crudo in validas:
+                self._cat = int(crudo)
+            else:
+                self.aviso_categoria = "Categoría no válida: se muestran los productos de todas las categorías."
+        return self._cat
+
     def get_queryset(self):
         q = normalizar_codigo(self.request.GET.get("q"))
         qs = servicios.productos_con_stock(Producto.objects.select_related("categoria"))
+        cat = self._filtro_categoria()
+        if cat == "ninguna":
+            qs = qs.filter(categoria__isnull=True)
+        elif cat is not None:
+            qs = qs.filter(categoria_id=cat)
         if not q:
             return qs.order_by("nombre", "pk")
         # Subconsultas (no joins): un producto nunca sale repetido ni altera su stock.
@@ -79,7 +102,14 @@ class ProductoLista(Permiso, ListView):
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        ctx["q"] = normalizar_codigo(self.request.GET.get("q"))
+        q = normalizar_codigo(self.request.GET.get("q"))
+        cat = self._filtro_categoria()
+        ctx.update({
+            "q": q, "categorias": self.categorias, "categoria_sel": "ninguna" if cat == "ninguna" else (cat or ""),
+            "aviso_categoria": self.aviso_categoria,
+            # los enlaces de pagina conservan la busqueda y la categoria
+            "filtros_qs": urlencode({k: v for k, v in (("q", q), ("categoria", "" if cat is None else cat)) if v != ""}),
+        })
         return ctx
 
 
@@ -244,7 +274,7 @@ class CategoriaLista(Permiso, ListView):
     permission_required = "inventario.view_categoria"
     template_name = "inventario/categoria_lista.html"
     context_object_name = "categorias"
-    queryset = Categoria.objects.order_by("nombre")
+    queryset = Categoria.objects.annotate(n_productos=Count("producto")).order_by("nombre")
 
 
 class CategoriaNueva(Permiso, MensajeExito, CreateView):

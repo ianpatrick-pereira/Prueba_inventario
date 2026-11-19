@@ -215,11 +215,10 @@ def test_kardex_sin_movimientos_no_falla(adm):
 
 
 # ------------------------------------------------------------------ 4. login: ancho del campo de contraseña
-def test_el_css_cubre_el_campo_de_contrasena_igual_que_el_de_usuario(client):
-    html = client.get("/cuentas/login/").content.decode()
-    estilo = html.split("<style>")[1].split("</style>")[0]
-    regla = next(r for r in estilo.split("}") if "input[type=text]" in r)
-    assert "input[type=password]" in regla and "min-width" in regla
+def test_el_css_cubre_el_campo_de_contrasena_igual_que_el_de_usuario():
+    css = (Path(__file__).resolve().parent.parent / "cuentas" / "static" / "css" / "sistema.css").read_text(encoding="utf-8")
+    regla = next(r for r in css.split("}") if "input[type=text]" in r)
+    assert "input[type=password]" in regla and "width: 100%" in regla
 
 
 # ------------------------------------------------------------------ 6. README

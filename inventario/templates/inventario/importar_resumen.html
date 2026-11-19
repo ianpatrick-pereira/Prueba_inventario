@@ -2,35 +2,37 @@
 {% load formato %}
 {% block titulo %}Resumen de la importación - Sistema de inventario{% endblock %}
 {% block contenido %}
-  <h1>Importación confirmada</h1>
-  <p>Archivo: <strong>{{ imp.nombre_original }}</strong> · {{ imp.usuario.get_username }} · {{ imp.fecha|date:"d-m-Y H:i" }}</p>
-  <div class="tarjeta">
-    <table>
-      <tr><th>Productos creados</th><td class="num">{{ r.creados }}</td></tr>
-      <tr><th>Productos con stock cargado</th><td class="num">{{ r.productos_con_stock }}</td></tr>
-      <tr><th>Unidades cargadas</th><td class="num">{{ r.unidades_cargadas|cl }}</td></tr>
-      <tr><th>Existentes actualizados</th><td class="num">{{ r.actualizados }}</td></tr>
-      <tr><th>Filas con error (no importadas)</th><td class="num">{{ r.con_error }}</td></tr>
-      <tr><th>Filas omitidas (totales)</th><td class="num">{{ r.omitidas|length }}</td></tr>
-    </table>
-    {% if imp.documento %}
-      <p>Documento de inventario inicial: {% if user.is_staff %}<a href="{% url 'admin:inventario_documento_change' imp.documento.pk %}">{{ imp.documento }}</a>{% else %}{{ imp.documento }}{% endif %}</p>
-    {% endif %}
+  <div class="cabecera-pagina">
+    <div>
+      <h1>Importación confirmada</h1>
+      <p class="subtitulo">Archivo: <strong>{{ imp.nombre_original }}</strong> · {{ imp.usuario.get_username }} · {{ imp.fecha|date:"d-m-Y H:i" }}</p>
+    </div>
+    <a class="boton" href="{% url 'producto_lista' %}">Ver productos</a>
   </div>
+  <div class="rejilla tres">
+    <div class="tarjeta"><div class="etiqueta-cifra">Productos creados</div><div class="cifra">{{ r.creados }}</div></div>
+    <div class="tarjeta"><div class="etiqueta-cifra">Productos con stock cargado</div><div class="cifra">{{ r.productos_con_stock }}</div></div>
+    <div class="tarjeta"><div class="etiqueta-cifra">Unidades cargadas</div><div class="cifra">{{ r.unidades_cargadas|cl }}</div></div>
+    <div class="tarjeta"><div class="etiqueta-cifra">Existentes actualizados</div><div class="cifra">{{ r.actualizados }}</div></div>
+    <div class="tarjeta"><div class="etiqueta-cifra">Filas con error (no importadas)</div><div class="cifra{% if r.con_error %} alerta{% endif %}">{{ r.con_error }}</div></div>
+    <div class="tarjeta"><div class="etiqueta-cifra">Filas omitidas (totales)</div><div class="cifra">{{ r.omitidas|length }}</div></div>
+  </div>
+  {% if imp.documento %}
+    <p>Documento de inventario inicial: {% if user.is_staff %}<a href="{% url 'admin:inventario_documento_change' imp.documento.pk %}">{{ imp.documento }}</a>{% else %}{{ imp.documento }}{% endif %}</p>
+  {% endif %}
   {% if r.pasaron_a_existentes %}
-  <div class="tarjeta"><p class="error">{{ r.pasaron_a_existentes }} fila{{ r.pasaron_a_existentes|pluralize }} pasaron a existentes desde la vista previa y no recibieron stock (otra persona creó esos códigos mientras tanto).</p></div>
+  <ul class="mensajes"><li class="warning">{{ r.pasaron_a_existentes }} fila{{ r.pasaron_a_existentes|pluralize }} pasaron a existentes desde la vista previa y no recibieron stock (otra persona creó esos códigos mientras tanto).</li></ul>
   {% endif %}
   {% if r.diferencias %}
-  <div class="tarjeta"><h2>Diferencias en productos existentes (no se modificó su stock)</h2>
-    <table><thead><tr><th>Código</th><th class="num">Archivo</th><th class="num">Sistema</th><th class="num">Diferencia</th></tr></thead>
-    {% for d in r.diferencias %}<tr><td>{{ d.codigo }}</td><td class="num">{{ d.archivo|cl }}</td><td class="num">{{ d.sistema|cl }}</td><td class="num">{{ d.diferencia|cl }}</td></tr>{% endfor %}
-    </table></div>
+  <h2>Diferencias en productos existentes (no se modificó su stock)</h2>
+  <div class="tabla-scroll"><table><thead><tr><th>Código</th><th class="num">Archivo</th><th class="num">Sistema</th><th class="num">Diferencia</th></tr></thead>
+    {% for d in r.diferencias %}<tr><td class="mono">{{ d.codigo }}</td><td class="num">{{ d.archivo|cl }}</td><td class="num">{{ d.sistema|cl }}</td><td class="num">{{ d.diferencia|cl }}</td></tr>{% endfor %}
+  </table></div>
   {% endif %}
   {% if r.errores %}
-  <div class="tarjeta"><h2>Filas con error (no importadas)</h2>
-    <table><thead><tr><th>Fila</th><th>Código</th><th>Motivo</th></tr></thead>
-    {% for e in r.errores %}<tr><td>{{ e.fila }}</td><td>{{ e.codigo|default:"-" }}</td><td>{{ e.mensajes|join:" " }}</td></tr>{% endfor %}
-    </table></div>
+  <h2>Filas con error (no importadas)</h2>
+  <div class="tabla-scroll"><table><thead><tr><th>Fila</th><th>Código</th><th>Motivo</th></tr></thead>
+    {% for e in r.errores %}<tr><td>{{ e.fila }}</td><td class="mono">{{ e.codigo|default:"-" }}</td><td>{{ e.mensajes|join:" " }}</td></tr>{% endfor %}
+  </table></div>
   {% endif %}
-  <p><a class="boton secundario" href="{% url 'producto_lista' %}">Ver productos</a></p>
 {% endblock %}
