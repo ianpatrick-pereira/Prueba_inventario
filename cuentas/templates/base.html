@@ -6,25 +6,23 @@
   <title>{% block titulo %}Sistema de inventario{% endblock %}</title>
   <link rel="stylesheet" href="{% static 'css/sistema.css' %}">
 </head>
-<body>
+<body{% if user.is_authenticated %} class="con-lateral"{% endif %}>
   <a class="saltar" href="#contenido">Saltar al contenido</a>
   {% if user.is_authenticated %}
   {% with u=request.resolver_match.url_name %}
-  <header class="barra-nav">
-    <div class="interior">
-      <a class="marca" href="{% url 'inicio' %}">Inventario<span>.</span></a>
-      <nav aria-label="Principal">
-        {% if perms.inventario.view_producto %}<a href="{% url 'producto_lista' %}"{% if u|empieza_con:'producto' or u|empieza_con:'codigo' or u == 'kardex' or u == 'salida' or u == 'entrada' or u == 'corregir' or u == 'conteo' or u|empieza_con:'movimiento' %} aria-current="page"{% endif %}>Productos</a>{% endif %}
-        {% if perms.inventario.view_proveedor %}<a href="{% url 'proveedor_lista' %}"{% if u|empieza_con:'proveedor' %} aria-current="page"{% endif %}>Proveedores</a>{% endif %}
-        {% if perms.inventario.view_categoria %}<a href="{% url 'categoria_lista' %}"{% if u|empieza_con:'categoria' %} aria-current="page"{% endif %}>Categorías</a>{% endif %}
-        {% if perms.inventario.importar_eleventa %}<a href="{% url 'importar_eleventa' %}"{% if u|empieza_con:'importar' %} aria-current="page"{% endif %}>Importar desde Eleventa</a>{% endif %}
-      </nav>
-      <div class="usuario">
-        <span>{{ user.get_username }}</span>
-        <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" class="boton-enlace">Cerrar sesión</button></form>
-      </div>
+  <aside class="lateral">
+    <a class="marca" href="{% url 'inicio' %}">Inventario</a>
+    <nav aria-label="Principal">
+      {% if perms.inventario.view_producto %}<a href="{% url 'producto_lista' %}"{% if u|empieza_con:'producto' or u|empieza_con:'codigo' or u == 'kardex' or u == 'salida' or u == 'entrada' or u == 'corregir' or u == 'conteo' or u|empieza_con:'movimiento' %} aria-current="page"{% endif %}>Productos</a>{% endif %}
+      {% if perms.inventario.view_proveedor %}<a href="{% url 'proveedor_lista' %}"{% if u|empieza_con:'proveedor' %} aria-current="page"{% endif %}>Proveedores</a>{% endif %}
+      {% if perms.inventario.view_categoria %}<a href="{% url 'categoria_lista' %}"{% if u|empieza_con:'categoria' %} aria-current="page"{% endif %}>Categorías</a>{% endif %}
+      {% if perms.inventario.importar_eleventa %}<a href="{% url 'importar_eleventa' %}"{% if u|empieza_con:'importar' %} aria-current="page"{% endif %}>Importar desde Eleventa</a>{% endif %}
+    </nav>
+    <div class="usuario">
+      <span>{{ user.get_username }}</span>
+      <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit" class="boton-enlace">Cerrar sesión</button></form>
     </div>
-  </header>
+  </aside>
   {% endwith %}
   {% endif %}
   <main id="contenido" class="contenedor">

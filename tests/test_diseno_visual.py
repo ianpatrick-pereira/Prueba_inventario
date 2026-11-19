@@ -93,27 +93,34 @@ def _contraste(a, b):
 
 PARES = [("fg", "bg"), ("fg", "panel"), ("muted", "bg"), ("muted", "panel"), ("accent", "panel"),
          ("accent-fg", "accent"), ("ok", "ok-soft"), ("warn", "warn-soft"), ("bad", "bad-soft"),
-         ("accent", "accent-soft"), ("bad", "panel"), ("accent", "bg")]
+         ("accent", "accent-soft"), ("bad", "panel"), ("accent", "bg"), ("fg", "cabecera-tabla"),
+         ("muted", "cabecera-tabla"), ("lateral-fg", "lateral"), ("lateral-activo-fg", "lateral-activo"),
+         ("lateral-activo-fg", "lateral"), ("lateral-borde", "lateral"), ("accent-fg", "bad-solid"),
+         ("muted", "accent-soft")]
 
 
-@pytest.mark.parametrize("tema", ["claro", "oscuro"])
-def test_contraste_de_la_paleta_cumple_wcag_aa(tema):
+def test_contraste_de_la_paleta_cumple_wcag_aa():
     css = CSS.read_text(encoding="utf-8")
-    claro = _variables(css.split(":root {", 1)[1].split("}", 1)[0])
-    if tema == "claro":
-        v = claro
-    else:
-        oscuro = _variables(css.split("prefers-color-scheme: dark", 1)[1].split("}", 1)[0])
-        v = {**claro, **oscuro}
+    v = _variables(css.split(":root {", 1)[1].split("}", 1)[0])
     for a, b in PARES:
-        assert _contraste(v[a], v[b]) >= 4.5, (tema, a, b, _contraste(v[a], v[b]))
+        minimo = 3.0 if a == "lateral-borde" else 4.5          # el borde activo es un indicador grafico (3:1)
+        assert _contraste(v[a], v[b]) >= minimo, (a, b, _contraste(v[a], v[b]))
+    assert "prefers-color-scheme" not in css                    # tema unico: sin paleta oscura que mantener
+
+
+def test_diseno_taller_barra_lateral_y_colores_del_prototipo():
+    css = CSS.read_text(encoding="utf-8")
+    v = _variables(css.split(":root {", 1)[1].split("}", 1)[0])
+    assert (v["lateral"], v["lateral-activo"], v["lateral-borde"], v["bg"], v["accent"], v["cabecera-tabla"]) == (
+        "#12302c", "#1f4a44", "#3fc1a7", "#eef2f1", "#14756a", "#dfe9e7")
+    assert ".lateral" in css and "position: sticky" in css and "@media (max-width: 800px)" in css
 
 
 def test_el_css_tiene_foco_visible_responsive_y_tablas_con_scroll_propio():
     css = CSS.read_text(encoding="utf-8")
     assert ":focus-visible" in css and "@media (max-width: 640px)" in css
     assert re.search(r"\.tabla-scroll\s*\{[^}]*overflow-x:\s*auto", css)
-    assert "position: sticky" in css and "nth-child(even)" in css
+    assert "position: sticky" in css
     for comp in (".insignia-bajo", ".insignia-error", ".insignia-aviso", ".insignia-nueva", ".insignia-existente",
                  ".insignia-reversa", ".mensajes .success", ".mensajes .error", ".mensajes .warning", ".boton.peligro",
                  ".boton.secundario", ".paginas", ".buscador", ".acceso", ".tarjeta", ".errorlist"):
@@ -164,16 +171,17 @@ def test_el_menu_marca_la_pagina_actual(adm):
 
 
 # ------------------------------------------------------------------ precio en la lista
-def test_lista_muestra_precio_venta_en_formato_es_cl_despues_del_stock(adm):
+def test_lista_muestra_precio_venta_en_pesos_al_final_de_la_fila(adm):
     adm_u = get_user_model().objects.get(username="adm")
     p = Producto.objects.create(sku="P1", nombre="Con precio", precio_venta=D("5990"), precio_mayoreo=D("5000"),
                                 costo=D("3500"))
     servicios.registrar_entrada(p, 3, adm_u)
     t = html(adm.get(reverse("producto_lista")))
-    assert "Precio venta" in t and "5.990,00" in t
-    assert t.index(">Stock<") < t.index(">Precio venta<") < t.index(">Stock mínimo<")
+    assert "Precio venta" in t and "$5.990" in t
+    cab = ["Código", "Nombre", "Categoría", "Stock", "Mínimo", "Precio venta"]
+    assert re.findall(r"<th[^>]*>([^<]+)</th>", t) == cab                # mismo orden que el diseño «Taller»
     ficha = html(adm.get(reverse("producto_detalle", args=[p.pk])))
-    assert "3.500,00" in ficha and "5.990,00" in ficha and "5.000,00" in ficha and "Precios" in ficha
+    assert "$3.500" in ficha and "$5.990" in ficha and "$5.000" in ficha and "Precios" in ficha
 
 
 def test_el_precio_no_agrega_consultas(adm):
@@ -300,3 +308,46 @@ def test_permisos_del_filtro_no_cambian(client, surtido):
     assert c.get(reverse("producto_lista"), {"categoria": a.pk}).status_code == 200
     t = html(c.get(reverse("categoria_lista")))
     assert "Editar" in t and f"/productos/?categoria={a.pk}" in t      # el operador puede ver y editar
+
+
+# ------------------------------------------------------------------ barra lateral
+def test_barra_lateral_con_menu_usuario_y_cierre_de_sesion_por_post(adm):
+    t = html(adm.get(reverse("producto_lista")))
+    assert '<body class="con-lateral">' in t and '<aside class="lateral">' in t
+    lateral = t.split('<aside class="lateral">')[1].split("</aside>")[0]
+    assert "Inventario" in lateral and "adm" in lateral and 'aria-current="page">Productos' in lateral
+    assert 'method="post" action="/cuentas/logout/"' in lateral and "csrfmiddlewaretoken" in lateral
+
+
+def test_el_ingreso_no_muestra_la_barra_lateral(client):
+    t = html(client.get("/cuentas/login/"))
+    assert "<aside" not in t and "con-lateral" not in t and "Ingresar" in t
+
+
+# ------------------------------------------------------------------ filtros de pesos y cantidad
+@pytest.mark.parametrize("valor,esperado", [
+    (6990, "$6.990"), (0, "$0"), (1234567, "$1.234.567"), (D("1234.50"), "$1.235"), (D("1234.49"), "$1.234"),
+    ("5990.00", "$5.990"), (D("0.5"), "$1"), (D("0.49"), "$0"), (D("-1500.50"), "-$1.501"), (D("999999999"), "$999.999.999"),
+    (None, ""), ("", ""),
+])
+def test_filtro_pesos(valor, esperado):
+    from inventario.templatetags.formato import formatear_pesos
+
+    assert formatear_pesos(valor) == esperado
+
+
+@pytest.mark.parametrize("valor,esperado", [
+    (3, "3"), (D("3.00"), "3"), (D("2.5"), "2,50"), (0, "0"), (D("3500"), "3.500"), (D("-4"), "-4"), (D("0.01"), "0,01"),
+    (None, ""),
+])
+def test_filtro_cantidad_sin_decimales_solo_si_es_entera(valor, esperado):
+    from inventario.templatetags.formato import formatear_cantidad
+
+    assert formatear_cantidad(valor) == esperado
+
+
+def test_el_filtro_pesos_no_cambia_lo_guardado(adm):
+    p = Producto.objects.create(sku="PS1", nombre="x", precio_venta=D("1234.50"))
+    adm.get(reverse("producto_lista"))
+    p.refresh_from_db()
+    assert p.precio_venta == D("1234.50")

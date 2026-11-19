@@ -633,7 +633,7 @@ def test_precios_en_formularios_y_ficha(adm):
     p = Producto.objects.get(sku="PR1")
     assert p.precio_venta == D("5990") and p.precio_mayoreo == D("5000.50")
     t = adm.get(reverse("producto_detalle", args=[p.pk])).content.decode()
-    assert "5.990,00" in t and "5.000,50" in t and "3.500,00" in t
+    assert "$5.990" in t and "$5.001" in t and "$3.500" in t        # pesos enteros; 5000,50 se redondea a $5.001
     for campo in ("precio_venta", "precio_mayoreo"):
         r = adm.post(reverse("producto_editar", args=[p.pk]), {**datos, campo: "-1"})
         assert r.status_code == 200 and campo in r.context["form"].errors

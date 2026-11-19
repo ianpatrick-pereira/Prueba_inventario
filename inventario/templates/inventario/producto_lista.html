@@ -2,40 +2,37 @@
 {% load formato %}
 {% block titulo %}Productos - Sistema de inventario{% endblock %}
 {% block contenido %}
-  <div class="cabecera-pagina">
-    <h1>Productos</h1>
-    {% if perms.inventario.add_producto %}<a class="boton secundario" href="{% url 'producto_nuevo' %}">Nuevo producto</a>{% endif %}
-  </div>
-  <form method="get" class="barra" role="search">
+  <div class="cabecera-pagina"><h1>Productos</h1></div>
+  <form method="get" class="barra herramientas" role="search">
     <div class="buscador">
       <input type="search" name="q" value="{{ q }}" placeholder="Código, código de proveedor o nombre" autofocus aria-label="Buscar productos">
-      <button type="submit">Buscar</button>
     </div>
-    <div class="campo" style="margin:0;min-width:220px">
-      <label for="id_categoria" class="ayuda">Categoría</label>
+    <div class="campo-select">
+      <label for="id_categoria" class="solo-lectores">Categoría</label>
       <select name="categoria" id="id_categoria">
-        <option value="">Todas</option>
+        <option value="">Todas las categorías</option>
         <option value="ninguna"{% if categoria_sel == "ninguna" %} selected{% endif %}>Sin categoría</option>
         {% for c in categorias %}<option value="{{ c.pk }}"{% if categoria_sel == c.pk %} selected{% endif %}>{{ c.nombre }}</option>{% endfor %}
       </select>
     </div>
-    <button type="submit" class="secundario">Filtrar</button>
+    <button type="submit">Buscar</button>
     {% if q or categoria_sel != "" %}<a class="boton secundario" href="{% url 'producto_lista' %}">Limpiar</a>{% endif %}
+    {% if perms.inventario.add_producto %}<a class="boton secundario" href="{% url 'producto_nuevo' %}">+ Nuevo producto</a>{% endif %}
   </form>
   {% if aviso_categoria %}<ul class="mensajes" role="status"><li class="warning">{{ aviso_categoria }}</li></ul>{% endif %}
   {% if productos %}
   <div class="tabla-scroll alta">
   <table>
-    <thead><tr><th>Código</th><th>Nombre</th><th>Categoría</th><th class="num">Stock</th><th class="num">Precio venta</th><th class="num">Stock mínimo</th></tr></thead>
+    <thead><tr><th>Código</th><th>Nombre</th><th>Categoría</th><th class="num">Stock</th><th class="num">Mínimo</th><th class="num">Precio venta</th></tr></thead>
     <tbody>
     {% for p in productos %}
       <tr{% if p.stock_min > 0 and p.stock <= p.stock_min %} class="bajo"{% endif %}>
         <td class="mono"><a href="{% url 'producto_detalle' p.pk %}">{{ p.sku }}</a></td>
         <td>{{ p.nombre }}</td>
         <td>{{ p.categoria.nombre|default:"-" }}</td>
-        <td class="num stock">{{ p.stock|cl }}{% if p.stock_min > 0 and p.stock <= p.stock_min %} <span class="insignia insignia-bajo">bajo mínimo</span>{% endif %}</td>
-        <td class="num">{{ p.precio_venta|cl }}</td>
-        <td class="num">{{ p.stock_min|cl }}</td>
+        <td class="num stock">{{ p.stock|cantidad }}{% if p.stock_min > 0 and p.stock <= p.stock_min %} <span class="insignia insignia-bajo">bajo mínimo</span>{% endif %}</td>
+        <td class="num">{{ p.stock_min|cantidad }}</td>
+        <td class="num">{{ p.precio_venta|pesos }}</td>
       </tr>
     {% endfor %}
     </tbody>

@@ -27,9 +27,9 @@
     <div class="tarjeta">
       <h3>Precios</h3>
       <dl class="datos">
-        <div class="dato"><dt>Costo de referencia</dt><dd>{{ producto.costo|cl }}</dd></div>
-        <div class="dato"><dt>Precio de venta</dt><dd>{{ producto.precio_venta|cl }}</dd></div>
-        <div class="dato"><dt>Precio mayoreo</dt><dd>{{ producto.precio_mayoreo|cl }}</dd></div>
+        <div class="dato"><dt>Costo de referencia</dt><dd>{{ producto.costo|pesos }}</dd></div>
+        <div class="dato"><dt>Precio de venta</dt><dd>{{ producto.precio_venta|pesos }}</dd></div>
+        <div class="dato"><dt>Precio mayoreo</dt><dd>{{ producto.precio_mayoreo|pesos }}</dd></div>
       </dl>
     </div>
   </div>

@@ -2,8 +2,8 @@
 {% block titulo %}Ingresar - Sistema de inventario{% endblock %}
 {% block contenido %}
   <div class="centrado">
+    <span class="marca-ingreso">Inventario</span>
     <h1>Ingresar</h1>
-    <p class="subtitulo">Sistema de inventario</p>
     <form method="post" class="tarjeta">
       {% csrf_token %}
       {% if form.non_field_errors %}
