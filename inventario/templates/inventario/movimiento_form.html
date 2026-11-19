@@ -2,20 +2,31 @@
 {% load formato %}
 {% block titulo %}{{ titulo }} - Sistema de inventario{% endblock %}
 {% block contenido %}
-  <h1>{{ titulo }}</h1>
-  <p>Producto: <strong>{{ producto.sku }}</strong> - {{ producto.nombre }}.
-     Stock actual: <strong>{{ stock|cl }}</strong></p>
-  <form method="post" class="tarjeta">
+  <div class="cabecera-pagina">
+    <div>
+      <h1>{{ titulo }}</h1>
+      <p class="subtitulo">Producto: <strong>{{ producto.sku }}</strong> - {{ producto.nombre }}</p>
+    </div>
+  </div>
+  <div class="tarjeta form-angosto">
+    <div class="etiqueta-cifra">Stock actual</div>
+    <div class="cifra">{{ stock|cl }} <span class="ayuda">{{ producto.unidad }}</span></div>
+  </div>
+  <form method="post" class="tarjeta form-angosto">
     {% csrf_token %}
     {{ form.token }}
     {{ form.non_field_errors }}
     {% for campo in form.visible_fields %}
-      <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
-      {{ campo }}
-      {{ campo.errors }}
+      <div class="campo{% if campo.errors %} con-error{% endif %}">
+        <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
+        {{ campo }}
+        {{ campo.errors }}
+      </div>
     {% endfor %}
     <p class="ayuda">La fecha y hora del movimiento son siempre las de ahora.</p>
-    <p><button type="submit">Guardar</button>
-      <a class="boton secundario" href="{% url 'kardex' producto.pk %}">Cancelar</a></p>
+    <div class="acciones">
+      <button type="submit" class="grande">Guardar</button>
+      <a class="boton secundario grande" href="{% url 'kardex' producto.pk %}">Cancelar</a>
+    </div>
   </form>
 {% endblock %}

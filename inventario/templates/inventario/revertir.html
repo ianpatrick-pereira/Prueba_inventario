@@ -2,8 +2,8 @@
 {% load formato %}
 {% block titulo %}Revertir movimiento - Sistema de inventario{% endblock %}
 {% block contenido %}
-  <h1>Revertir movimiento</h1>
-  <div class="tarjeta">
+  <div class="cabecera-pagina"><h1>Revertir movimiento</h1></div>
+  <div class="tarjeta form-ancho">
     <p>Producto: <strong>{{ producto.sku }}</strong> - {{ producto.nombre }}</p>
     <p>Movimiento n.º {{ m.pk }}: {{ m.get_tipo_display }} de <strong>{{ m.cantidad|cl }}</strong>
        el {{ m.fecha|date:"d-m-Y H:i" }} por {{ m.usuario.get_username }}.</p>
@@ -11,16 +11,20 @@
     {% if es_reversa %}<p class="error">Este movimiento ya es una reversa y no se puede revertir.</p>{% endif %}
     {% if reversa %}<p class="error">Este movimiento ya fue revertido (movimiento n.º {{ reversa.pk }}).</p>{% endif %}
   </div>
-  <form method="post" class="tarjeta">
+  <form method="post" class="tarjeta form-ancho">
     {% csrf_token %}
     {{ form.token }}
     {{ form.non_field_errors }}
     {% for campo in form.visible_fields %}
-      <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
-      {{ campo }}
-      {{ campo.errors }}
+      <div class="campo{% if campo.errors %} con-error{% endif %}">
+        <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
+        {{ campo }}
+        {{ campo.errors }}
+      </div>
     {% endfor %}
-    <p><button type="submit" class="peligro">Revertir</button>
-      <a class="boton secundario" href="{% url 'kardex' producto.pk %}">Cancelar</a></p>
+    <div class="acciones">
+      <button type="submit" class="peligro">Revertir</button>
+      <a class="boton secundario" href="{% url 'kardex' producto.pk %}">Cancelar</a>
+    </div>
   </form>
 {% endblock %}

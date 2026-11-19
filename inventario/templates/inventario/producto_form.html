@@ -1,18 +1,24 @@
 {% extends "base.html" %}
 {% block titulo %}{% if object %}Editar producto{% else %}Nuevo producto{% endif %} - Sistema de inventario{% endblock %}
 {% block contenido %}
-  <h1>{% if object %}Editar producto {{ object.sku }}{% else %}Nuevo producto{% endif %}</h1>
-  <form method="post" class="tarjeta">
+  <div class="cabecera-pagina"><h1>{% if object %}Editar producto {{ object.sku }}{% else %}Nuevo producto{% endif %}</h1></div>
+  <form method="post" class="tarjeta form-ancho">
     {% csrf_token %}
     {{ form.non_field_errors }}
+    <div class="campos-fila">
     {% for campo in form %}
-      <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
-      {{ campo }}
-      {% if campo.help_text %}<div class="ayuda">{{ campo.help_text }}</div>{% endif %}
-      {{ campo.errors }}
+      <div class="campo{% if campo.errors %} con-error{% endif %}">
+        <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
+        {{ campo }}
+        {% if campo.help_text %}<div class="ayuda">{{ campo.help_text }}</div>{% endif %}
+        {{ campo.errors }}
+      </div>
     {% endfor %}
+    </div>
     <p class="ayuda">El stock no se edita aquí: cambia solo con movimientos.</p>
-    <p><button type="submit">Guardar</button>
-      <a class="boton secundario" href="{% if object %}{% url 'producto_detalle' object.pk %}{% else %}{% url 'producto_lista' %}{% endif %}">Cancelar</a></p>
+    <div class="acciones">
+      <button type="submit">Guardar</button>
+      <a class="boton secundario" href="{% if object %}{% url 'producto_detalle' object.pk %}{% else %}{% url 'producto_lista' %}{% endif %}">Cancelar</a>
+    </div>
   </form>
 {% endblock %}

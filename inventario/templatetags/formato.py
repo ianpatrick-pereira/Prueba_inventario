@@ -23,3 +23,9 @@ def formatear_numero(valor, decimales=2):
 @register.filter(name="cl")
 def cl(valor, decimales=2):
     return formatear_numero(valor, int(decimales))
+
+
+@register.filter(name="empieza_con")
+def empieza_con(valor, prefijo):
+    """Para marcar la pagina actual en el menu: url_name|empieza_con:"producto"."""
+    return str(valor or "").startswith(prefijo)

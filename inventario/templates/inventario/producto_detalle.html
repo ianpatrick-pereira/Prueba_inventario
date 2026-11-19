@@ -2,49 +2,73 @@
 {% load formato %}
 {% block titulo %}{{ producto.nombre }} - Sistema de inventario{% endblock %}
 {% block contenido %}
-  <h1>{{ producto.nombre }}</h1>
-  <div class="barra">
-    <a class="boton secundario" href="{% url 'producto_lista' %}">Volver a productos</a>
-    {% if perms.inventario.change_producto %}<a class="boton secundario" href="{% url 'producto_editar' producto.pk %}">Editar</a>{% endif %}
-    {% if perms.inventario.view_movimiento %}<a class="boton secundario" href="{% url 'kardex' producto.pk %}">Ver kardex</a>{% endif %}
-    {% if perms.inventario.registrar_salida %}<a class="boton secundario" href="{% url 'salida' producto.pk %}">Registrar salida</a>{% endif %}
-    {% if perms.inventario.registrar_ajuste %}<a class="boton secundario" href="{% url 'ajuste' producto.pk %}">Ajuste</a>
-    <a class="boton secundario" href="{% url 'conteo' producto.pk %}">Conteo</a>{% endif %}
+  <div class="cabecera-pagina">
+    <div>
+      <h1>{{ producto.nombre }}</h1>
+      <p class="subtitulo">Código <span class="mono">{{ producto.sku }}</span></p>
+    </div>
+    <div class="barra" style="margin:0">
+      {% if perms.inventario.view_movimiento %}<a class="boton" href="{% url 'kardex' producto.pk %}">Ver kardex</a>{% endif %}
+      {% if perms.inventario.registrar_salida %}<a class="boton secundario" href="{% url 'salida' producto.pk %}">Registrar salida</a>{% endif %}
+      {% if perms.inventario.registrar_ajuste %}<a class="boton secundario" href="{% url 'ajuste' producto.pk %}">Ajuste</a>
+      <a class="boton secundario" href="{% url 'conteo' producto.pk %}">Conteo</a>{% endif %}
+      {% if perms.inventario.change_producto %}<a class="boton secundario" href="{% url 'producto_editar' producto.pk %}">Editar</a>{% endif %}
+      <a class="boton secundario" href="{% url 'producto_lista' %}">Volver a productos</a>
+    </div>
+  </div>
+
+  <div class="rejilla dos">
+    <div class="tarjeta">
+      <div class="etiqueta-cifra">Stock actual</div>
+      <div class="cifra{% if producto.stock_min > 0 and stock <= producto.stock_min %} alerta{% endif %}">{{ stock|cl }} <span class="ayuda">{{ producto.unidad }}</span></div>
+      {% if producto.stock_min > 0 and stock <= producto.stock_min %}<p><span class="insignia insignia-bajo">(en o bajo el mínimo)</span></p>{% endif %}
+      <dl class="datos">
+        <div class="dato"><dt>Stock mínimo</dt><dd>{{ producto.stock_min|cl }}</dd></div>
+        <div class="dato"><dt>Stock máximo</dt><dd>{{ producto.stock_max|cl }}</dd></div>
+      </dl>
+    </div>
+    <div class="tarjeta">
+      <h3>Precios</h3>
+      <dl class="datos">
+        <div class="dato"><dt>Costo de referencia</dt><dd>{{ producto.costo|cl }}</dd></div>
+        <div class="dato"><dt>Precio de venta</dt><dd>{{ producto.precio_venta|cl }}</dd></div>
+        <div class="dato"><dt>Precio mayoreo</dt><dd>{{ producto.precio_mayoreo|cl }}</dd></div>
+      </dl>
+    </div>
   </div>
   <div class="tarjeta">
-    <table>
-      <tr><th>Código</th><td>{{ producto.sku }}</td></tr>
-      <tr><th>Categoría</th><td>{{ producto.categoria.nombre|default:"-" }}</td></tr>
-      <tr><th>Unidad</th><td>{{ producto.unidad }}</td></tr>
-      <tr><th>Costo de referencia</th><td>{{ producto.costo|cl }}</td></tr>
-      <tr><th>Precio de venta</th><td>{{ producto.precio_venta|cl }}</td></tr>
-      <tr><th>Precio mayoreo</th><td>{{ producto.precio_mayoreo|cl }}</td></tr>
-      <tr><th>Stock actual</th><td><strong>{{ stock|cl }}</strong>{% if producto.stock_min > 0 and stock <= producto.stock_min %} <span class="etiqueta-bajo">(en o bajo el mínimo)</span>{% endif %}</td></tr>
-      <tr><th>Stock mínimo / máximo</th><td>{{ producto.stock_min|cl }} / {{ producto.stock_max|cl }}</td></tr>
-    </table>
+    <dl class="datos">
+      <div class="dato"><dt>Código</dt><dd class="mono">{{ producto.sku }}</dd></div>
+      <div class="dato"><dt>Categoría</dt><dd>{% if producto.categoria %}<a href="{% url 'producto_lista' %}?categoria={{ producto.categoria_id }}">{{ producto.categoria.nombre }}</a>{% else %}-{% endif %}</dd></div>
+      <div class="dato"><dt>Unidad</dt><dd>{{ producto.unidad }}</dd></div>
+    </dl>
   </div>
 
   <div class="tarjeta">
     <h2>Códigos alternativos</h2>
     {% if codigos %}
+    <div class="tabla-scroll">
     <table>
       <thead><tr><th>Tipo</th><th>Código</th><th></th></tr></thead>
       {% for c in codigos %}
-      <tr><td>{{ c.get_tipo_display }}</td><td>{{ c.valor }}</td>
-        <td>{% if perms.inventario.delete_codigoalternativo %}<a href="{% url 'codigo_quitar' c.pk %}">Quitar</a>{% endif %}</td></tr>
+      <tr><td>{{ c.get_tipo_display }}</td><td class="mono">{{ c.valor }}</td>
+        <td class="num">{% if perms.inventario.delete_codigoalternativo %}<a href="{% url 'codigo_quitar' c.pk %}">Quitar</a>{% endif %}</td></tr>
       {% endfor %}
     </table>
+    </div>
     {% else %}<p class="vacio">Sin códigos alternativos.</p>{% endif %}
     {% if form_codigo %}
-    <form method="post" action="{% url 'codigo_agregar' producto.pk %}">
+    <form method="post" action="{% url 'codigo_agregar' producto.pk %}" class="form-angosto">
       {% csrf_token %}
       <h3>Agregar código alternativo</h3>
       {{ form_codigo.non_field_errors }}
       {% for campo in form_codigo %}
-        <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
-        {{ campo }}{{ campo.errors }}
+        <div class="campo{% if campo.errors %} con-error{% endif %}">
+          <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
+          {{ campo }}{{ campo.errors }}
+        </div>
       {% endfor %}
-      <p><button type="submit">Agregar código</button></p>
+      <button type="submit">Agregar código</button>
     </form>
     {% endif %}
   </div>
@@ -52,24 +76,28 @@
   <div class="tarjeta">
     <h2>Códigos por proveedor</h2>
     {% if codigos_proveedor %}
+    <div class="tabla-scroll">
     <table>
       <thead><tr><th>Proveedor</th><th>Código del proveedor</th><th></th></tr></thead>
       {% for c in codigos_proveedor %}
-      <tr><td>{{ c.proveedor.nombre }}</td><td>{{ c.codigo_proveedor }}</td>
-        <td>{% if perms.inventario.delete_productoproveedor %}<a href="{% url 'codigo_proveedor_quitar' c.pk %}">Quitar</a>{% endif %}</td></tr>
+      <tr><td>{{ c.proveedor.nombre }}</td><td class="mono">{{ c.codigo_proveedor }}</td>
+        <td class="num">{% if perms.inventario.delete_productoproveedor %}<a href="{% url 'codigo_proveedor_quitar' c.pk %}">Quitar</a>{% endif %}</td></tr>
       {% endfor %}
     </table>
+    </div>
     {% else %}<p class="vacio">Sin códigos de proveedor.</p>{% endif %}
     {% if form_proveedor %}
-    <form method="post" action="{% url 'codigo_proveedor_agregar' producto.pk %}">
+    <form method="post" action="{% url 'codigo_proveedor_agregar' producto.pk %}" class="form-angosto">
       {% csrf_token %}
       <h3>Agregar código de proveedor</h3>
       {{ form_proveedor.non_field_errors }}
       {% for campo in form_proveedor %}
-        <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
-        {{ campo }}{{ campo.errors }}
+        <div class="campo{% if campo.errors %} con-error{% endif %}">
+          <label for="{{ campo.id_for_label }}">{{ campo.label }}</label>
+          {{ campo }}{{ campo.errors }}
+        </div>
       {% endfor %}
-      <p><button type="submit">Agregar código de proveedor</button></p>
+      <button type="submit">Agregar código de proveedor</button>
     </form>
     {% endif %}
   </div>
