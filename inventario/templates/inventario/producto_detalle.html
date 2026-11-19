@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% load formato %}
 {% block titulo %}{{ producto.nombre }} - Sistema de inventario{% endblock %}
+{% block migas %}
+  <nav class="migas" aria-label="Ruta"><a href="{{ enlace_lista }}">← Productos</a> <span aria-hidden="true">›</span> <span aria-current="page">{{ producto.sku }}</span></nav>
+{% endblock %}
 {% block contenido %}
   <div class="cabecera-pagina">
     <div>
@@ -18,7 +21,7 @@
       <div class="etiqueta-cifra">Stock actual</div>
       <div class="cifra{% if producto.stock_min > 0 and stock <= producto.stock_min %} alerta{% endif %}">{{ stock|cl }} <span class="ayuda">{{ producto.unidad }}</span></div>
       {% if producto.stock_min > 0 and stock <= producto.stock_min %}<p><span class="insignia insignia-bajo">(en o bajo el mínimo)</span></p>{% endif %}
-      {% if perms.inventario.view_movimiento %}<p><a class="boton grande" href="{% url 'kardex' producto.pk %}">Ver kardex</a></p>{% endif %}
+      {% if perms.inventario.view_movimiento %}<p><a class="boton grande" href="{% url 'kardex' producto.pk %}{% if volver_param %}?{{ volver_param }}{% endif %}">Ver kardex</a></p>{% endif %}
       <dl class="datos">
         <div class="dato"><dt>Stock mínimo</dt><dd>{{ producto.stock_min|cl }}</dd></div>
         <div class="dato"><dt>Stock máximo</dt><dd>{{ producto.stock_max|cl }}</dd></div>
@@ -41,8 +44,8 @@
     </dl>
   </div>
 
-  <div class="tarjeta">
-    <h2>Códigos alternativos</h2>
+  <details class="tarjeta historial"{% if abrir_alternativos %} open{% endif %}>
+    <summary>Códigos alternativos ({{ codigos|length }})</summary>
     {% if codigos %}
     <div class="tabla-scroll">
     <table>
@@ -68,10 +71,10 @@
       <button type="submit">Agregar código</button>
     </form>
     {% endif %}
-  </div>
+  </details>
 
-  <div class="tarjeta">
-    <h2>Códigos por proveedor</h2>
+  <details class="tarjeta historial"{% if abrir_proveedores %} open{% endif %}>
+    <summary>Códigos por proveedor ({{ codigos_proveedor|length }})</summary>
     {% if codigos_proveedor %}
     <div class="tabla-scroll">
     <table>
@@ -97,5 +100,5 @@
       <button type="submit">Agregar código de proveedor</button>
     </form>
     {% endif %}
-  </div>
+  </details>
 {% endblock %}

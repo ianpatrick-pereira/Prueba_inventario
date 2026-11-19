@@ -26,6 +26,7 @@
   {% endwith %}
   {% endif %}
   <main id="contenido" class="contenedor">
+    {% block migas %}{% endblock %}
     {% if messages %}
       <ul class="mensajes" role="status">
         {% for m in messages %}<li class="{{ m.tags }}">{{ m }}</li>{% endfor %}

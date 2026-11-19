@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% load formato %}
 {% block titulo %}Revertir movimiento - Sistema de inventario{% endblock %}
+{% block migas %}
+  <nav class="migas" aria-label="Ruta"><a href="{% url 'producto_lista' %}">← Productos</a> <span aria-hidden="true">›</span>
+    <a href="{% url 'producto_detalle' producto.pk %}">{{ producto.sku }}</a> <span aria-hidden="true">›</span>
+    <a href="{% url 'kardex' producto.pk %}">Kardex</a> <span aria-hidden="true">›</span> <span aria-current="page">Revertir movimiento</span></nav>
+{% endblock %}
 {% block contenido %}
   <div class="cabecera-pagina"><h1>Revertir movimiento</h1></div>
   <div class="tarjeta form-ancho">
