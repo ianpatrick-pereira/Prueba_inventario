@@ -3,6 +3,7 @@ generan aqui; nunca se lee ni se sube un archivo real."""
 import io
 import re
 import subprocess
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from decimal import Decimal
 
 import pytest
@@ -643,26 +644,56 @@ def test_precios_en_formularios_y_ficha(adm):
 
 
 # ------------------------------------------------------------------ 12. archivo con nombre aleatorio
+def es_ruta_de_importacion(ruta, extension="xlsx", clase=PurePath):
+    """True si `ruta` termina en importaciones/<32 hex>.<extension>, con el separador de la
+    plataforma (/ en Linux, \\ en Windows). Se compara por partes, no como texto."""
+    p = clase(str(ruta))
+    return p.parent.name == "importaciones" and re.fullmatch(rf"[0-9a-f]{{32}}\.{extension}", p.name) is not None
+
+
+@pytest.mark.parametrize("ruta,clase,esperado", [
+    ("/srv/app/media/importaciones/0123456789abcdef0123456789abcdef.xlsx", PurePosixPath, True),
+    ("C:\\Users\\ana\\inv\\media\\importaciones\\019b9b55aaaabbbbccccddddeeeeffff.xlsx", PureWindowsPath, True),
+    ("C:\\Users\\ana\\media\\importaciones\\mi inventario.xlsx", PureWindowsPath, False),
+    ("C:\\Users\\ana\\media\\otra\\0123456789abcdef0123456789abcdef.xlsx", PureWindowsPath, False),
+    ("/srv/media/importaciones/0123456789abcdef0123456789abcde.xlsx", PurePosixPath, False),
+    ("/srv/media/importaciones/0123456789ABCDEF0123456789abcdef.xlsx", PurePosixPath, False),
+])
+def test_comprobacion_de_ruta_funciona_con_separadores_de_linux_y_de_windows(ruta, clase, esperado):
+    # Simula Windows sin estar en Windows: PureWindowsPath interpreta «\\» como separador.
+    assert es_ruta_de_importacion(ruta, clase=clase) is esperado
+
+
 def test_archivo_guardado_con_nombre_aleatorio_en_importaciones(adm, settings):
     i = preparar(adm, xlsx(FILAS), "mi inventario secreto.xlsx")
-    ruta = i.archivo.path
-    assert re.fullmatch(r".*/importaciones/[0-9a-f]{32}\.xlsx", ruta)
-    assert "secreto" not in ruta and i.nombre_original == "mi inventario secreto.xlsx"
-    assert str(settings.MEDIA_ROOT) in ruta
+    ruta = Path(i.archivo.path)
+    assert es_ruta_de_importacion(ruta)
+    assert "secreto" not in str(ruta) and i.nombre_original == "mi inventario secreto.xlsx"
+    assert ruta.resolve().is_relative_to(Path(settings.MEDIA_ROOT).resolve())   # sin comparar texto de rutas
+    assert ruta.is_file()
 
 
 def test_nombre_con_ruta_se_reduce_al_nombre_final(adm):
     i = preparar(adm, csv_bytes(FILAS), "..\\..\\etc\\pasw.csv")
-    assert i.nombre_original == "pasw.csv" and i.archivo.path.endswith(".csv")
+    assert i.nombre_original == "pasw.csv" and es_ruta_de_importacion(i.archivo.path, "csv")
+
+
+RAIZ = Path(__file__).resolve().parent.parent
 
 
 def test_media_esta_fuera_de_git():
-    r = subprocess.run(["git", "check-ignore", "-q", "media/importaciones/x.xlsx"], capture_output=True)
+    lineas = (RAIZ / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "media/" in [l.strip() for l in lineas]
+    try:
+        r = subprocess.run(["git", "check-ignore", "-q", "media/importaciones/x.xlsx"],
+                           capture_output=True, cwd=RAIZ)
+    except FileNotFoundError:        # git no esta en el PATH (p. ej. algunos equipos Windows)
+        return
     assert r.returncode == 0
 
 
 def test_requirements_fija_openpyxl_y_et_xmlfile():
-    t = open("requirements.txt").read()
+    t = (RAIZ / "requirements.txt").read_text(encoding="utf-8")
     assert "openpyxl==3.1.5" in t and re.search(r"^et_xmlfile==\d", t, re.M)
 
 
@@ -898,3 +929,13 @@ def test_el_analisis_se_vacia_al_confirmar_y_al_descartar(adm):
     adm.post(url, {"token": token_de(adm.get(url)), "accion": "descartar"})
     j.refresh_from_db()
     assert j.estado == "descartada" and j.analisis == {}
+
+
+def test_csv_con_saltos_de_linea_de_windows_crlf_se_lee_igual():
+    lf = csv_bytes(FILAS)
+    crlf = lf.replace(b"\n", b"\r\n")
+    assert b"\r\n" in crlf and b"\r\r\n" not in crlf
+    a, b = imp.analizar_contenido(lf, "x.csv"), imp.analizar_contenido(crlf, "x.csv")
+    assert [f.a_dict() for f in a] == [f.a_dict() for f in b] and len(b) == 3
+    con_bom = imp.analizar_contenido(b"\xef\xbb\xbf" + crlf, "x.csv")        # Excel en Windows agrega BOM
+    assert [f.codigo for f in con_bom] == ["0077", "A100", "B200"]
