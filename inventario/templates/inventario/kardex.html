@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% load formato %}
+{% block titulo %}Kardex {{ producto.sku }} - Sistema de inventario{% endblock %}
+{% block contenido %}
+  <h1>Kardex: {{ producto.nombre }}</h1>
+  <div class="barra">
+    <a class="boton secundario" href="{% url 'producto_detalle' producto.pk %}">Volver a la ficha</a>
+    {% if perms.inventario.registrar_salida %}<a class="boton secundario" href="{% url 'salida' producto.pk %}">Registrar salida</a>{% endif %}
+    {% if perms.inventario.registrar_ajuste %}<a class="boton secundario" href="{% url 'ajuste' producto.pk %}">Ajuste</a>
+    <a class="boton secundario" href="{% url 'conteo' producto.pk %}">Conteo</a>{% endif %}
+  </div>
+  <p>Código <strong>{{ producto.sku }}</strong> · Stock actual: <strong>{{ stock|cl }}</strong> {{ producto.unidad }}</p>
+
+  <form method="get" class="barra">
+    <label for="id_desde">Desde</label> <input type="date" name="desde" id="id_desde" value="{{ filtro.data.desde }}">
+    <label for="id_hasta">Hasta</label> <input type="date" name="hasta" id="id_hasta" value="{{ filtro.data.hasta }}">
+    <button type="submit">Filtrar</button>
+    {% if filtro.data.desde or filtro.data.hasta %}<a class="boton secundario" href="{% url 'kardex' producto.pk %}">Quitar filtro</a>{% endif %}
+  </form>
+  {% if filtro.errors %}<p class="error">Fecha no válida: usa el formato AAAA-MM-DD.</p>{% endif %}
+
+  {% if saldo_inicial is not None %}<p>Saldo inicial del período: <strong>{{ saldo_inicial|cl }}</strong></p>{% endif %}
+
+  {% if filas %}
+  <table>
+    <thead><tr><th>Fecha</th><th>Tipo</th><th class="num">Cantidad</th><th class="num">Saldo</th><th>Documento</th><th>Usuario</th><th>Motivo</th><th></th></tr></thead>
+    <tbody>
+    {% for f in filas %}
+      <tr id="mov-{{ f.m.pk }}">
+        <td>{{ f.m.fecha|date:"d-m-Y H:i" }}</td>
+        <td>{{ f.m.get_tipo_display }}</td>
+        <td class="num">{{ f.m.cantidad|cl }}</td>
+        <td class="num">{{ f.saldo|cl }}</td>
+        <td>{% if f.m.documento %}{{ f.m.documento }}{% else %}-{% endif %}</td>
+        <td>{{ f.m.usuario.get_username }}</td>
+        <td>{{ f.m.motivo|default:"-" }}
+          {% if f.m.revierte_id %}<br><span class="ayuda">Reversa del movimiento <a href="#mov-{{ f.m.revierte_id }}">n.º {{ f.m.revierte_id }}</a></span>{% endif %}
+          {% if f.reversa_id %}<br><span class="ayuda">Revertido por el movimiento <a href="#mov-{{ f.reversa_id }}">n.º {{ f.reversa_id }}</a></span>{% endif %}
+        </td>
+        <td>{% if perms.inventario.revertir_movimiento and f.puede_revertir %}<a href="{% url 'movimiento_revertir' f.m.pk %}">Revertir</a>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if pagina.has_other_pages %}
+  <div class="paginas">
+    {% if pagina.has_previous %}<a href="?page={{ pagina.previous_page_number }}{% if filtro_qs %}&amp;{{ filtro_qs }}{% endif %}">Anterior</a>{% endif %}
+    <span>Página {{ pagina.number }} de {{ pagina.paginator.num_pages }}</span>
+    {% if pagina.has_next %}<a href="?page={{ pagina.next_page_number }}{% if filtro_qs %}&amp;{{ filtro_qs }}{% endif %}">Siguiente</a>
+    <a href="?page={{ pagina.paginator.num_pages }}{% if filtro_qs %}&amp;{{ filtro_qs }}{% endif %}">Última</a>{% endif %}
+  </div>
+  {% endif %}
+  {% else %}<p class="vacio">No hay movimientos{% if saldo_inicial is not None %} en este período{% endif %}.</p>{% endif %}
+{% endblock %}

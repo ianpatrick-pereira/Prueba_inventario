@@ -1,19 +1,24 @@
 {% extends "base.html" %}
+{% load formato %}
 {% block titulo %}{{ producto.nombre }} - Sistema de inventario{% endblock %}
 {% block contenido %}
   <h1>{{ producto.nombre }}</h1>
   <div class="barra">
     <a class="boton secundario" href="{% url 'producto_lista' %}">Volver a productos</a>
     {% if perms.inventario.change_producto %}<a class="boton secundario" href="{% url 'producto_editar' producto.pk %}">Editar</a>{% endif %}
+    {% if perms.inventario.view_movimiento %}<a class="boton secundario" href="{% url 'kardex' producto.pk %}">Ver kardex</a>{% endif %}
+    {% if perms.inventario.registrar_salida %}<a class="boton secundario" href="{% url 'salida' producto.pk %}">Registrar salida</a>{% endif %}
+    {% if perms.inventario.registrar_ajuste %}<a class="boton secundario" href="{% url 'ajuste' producto.pk %}">Ajuste</a>
+    <a class="boton secundario" href="{% url 'conteo' producto.pk %}">Conteo</a>{% endif %}
   </div>
   <div class="tarjeta">
     <table>
       <tr><th>Código</th><td>{{ producto.sku }}</td></tr>
       <tr><th>Categoría</th><td>{{ producto.categoria.nombre|default:"-" }}</td></tr>
       <tr><th>Unidad</th><td>{{ producto.unidad }}</td></tr>
-      <tr><th>Costo de referencia</th><td>{{ producto.costo|floatformat:2 }}</td></tr>
-      <tr><th>Stock actual</th><td><strong>{{ stock|floatformat:2 }}</strong>{% if producto.stock_min > 0 and stock <= producto.stock_min %} <span class="etiqueta-bajo">(en o bajo el mínimo)</span>{% endif %}</td></tr>
-      <tr><th>Stock mínimo / máximo</th><td>{{ producto.stock_min|floatformat:2 }} / {{ producto.stock_max|floatformat:2 }}</td></tr>
+      <tr><th>Costo de referencia</th><td>{{ producto.costo|cl }}</td></tr>
+      <tr><th>Stock actual</th><td><strong>{{ stock|cl }}</strong>{% if producto.stock_min > 0 and stock <= producto.stock_min %} <span class="etiqueta-bajo">(en o bajo el mínimo)</span>{% endif %}</td></tr>
+      <tr><th>Stock mínimo / máximo</th><td>{{ producto.stock_min|cl }} / {{ producto.stock_max|cl }}</td></tr>
     </table>
   </div>
 
