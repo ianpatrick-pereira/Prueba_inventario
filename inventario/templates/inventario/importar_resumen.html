@@ -17,6 +17,9 @@
       <p>Documento de inventario inicial: {% if user.is_staff %}<a href="{% url 'admin:inventario_documento_change' imp.documento.pk %}">{{ imp.documento }}</a>{% else %}{{ imp.documento }}{% endif %}</p>
     {% endif %}
   </div>
+  {% if r.pasaron_a_existentes %}
+  <div class="tarjeta"><p class="error">{{ r.pasaron_a_existentes }} fila{{ r.pasaron_a_existentes|pluralize }} pasaron a existentes desde la vista previa y no recibieron stock (otra persona creó esos códigos mientras tanto).</p></div>
+  {% endif %}
   {% if r.diferencias %}
   <div class="tarjeta"><h2>Diferencias en productos existentes (no se modificó su stock)</h2>
     <table><thead><tr><th>Código</th><th class="num">Archivo</th><th class="num">Sistema</th><th class="num">Diferencia</th></tr></thead>

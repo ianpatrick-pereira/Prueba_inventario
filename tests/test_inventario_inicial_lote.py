@@ -98,3 +98,41 @@ def test_numero_de_consultas_no_crece_con_las_filas(doc):
     with CaptureQueriesContext(connection) as q2:
         servicios.registrar_inventario_inicial_en_lote(b, adm, doc)
     assert len(q2) <= len(q1) + 2
+
+
+def test_exige_documento_de_inventario_inicial_o_ninguno(productos):
+    adm = usuario("adm", "Administrador")
+    for tipo in ("venta", "factura", "ajuste", "conteo"):
+        with pytest.raises(ValidationError) as e:
+            servicios.registrar_inventario_inicial_en_lote(
+                [(productos[0], 1)], adm, Documento.objects.create(tipo=tipo, nombre=tipo, numero="1" if tipo != "factura" else "9",
+                                                                    proveedor=None if tipo != "factura" else __import__("inventario.models", fromlist=["Proveedor"]).Proveedor.objects.create(nombre="P")))
+        assert "documento" in e.value.error_dict
+    assert Movimiento.objects.count() == 0
+    servicios.registrar_inventario_inicial_en_lote([(productos[0], 1)], adm, None)      # None se acepta
+    assert Movimiento.objects.count() == 1
+
+
+def test_bloquea_los_productos_antes_de_verificar_movimientos_previos(doc, productos, monkeypatch):
+    from django.db.models import QuerySet
+
+    adm = usuario("adm", "Administrador")
+    llamadas = []
+    real = QuerySet.select_for_update
+
+    def espia(self, *a, **k):
+        llamadas.append(self.model.__name__)
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(QuerySet, "select_for_update", espia)
+    with CaptureQueriesContext(connection) as q:
+        servicios.registrar_inventario_inicial_en_lote([(p, 1) for p in productos], adm, doc)
+    assert llamadas == ["Producto"]
+    sqls = [x["sql"] for x in q.captured_queries]
+    bloqueo = next(i for i, s in enumerate(sqls) if 'FROM "inventario_producto"' in s)
+    previos = next(i for i, s in enumerate(sqls) if 'FROM "inventario_movimiento"' in s and "LIMIT 1" in s)
+    assert bloqueo < previos
+
+
+def test_docstring_aclara_que_es_solo_para_inventario_inicial():
+    assert "SOLO para la carga de INVENTARIO INICIAL" in servicios.registrar_inventario_inicial_en_lote.__doc__

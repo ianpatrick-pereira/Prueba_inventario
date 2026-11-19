@@ -91,7 +91,7 @@ def token_de(r):
 def preparar(client, contenido=None, nombre="inventario.xlsx"):
     r = subir(client, contenido or xlsx(FILAS), nombre)
     assert r.status_code == 302, r.content.decode()[:500]
-    return ImportacionEleventa.objects.get()
+    return ImportacionEleventa.objects.order_by("-pk").first()
 
 
 def confirmar_http(client, i, actualizar=False):
@@ -838,3 +838,63 @@ def test_la_vista_previa_de_5000_filas_pagina_y_no_relee(adm):
     t0 = time.perf_counter()
     r = adm.get(reverse("importar_vista_previa", args=[i.pk]), {"page": 50})
     assert r.status_code == 200 and len(r.context["pagina"]) == 100 and time.perf_counter() - t0 < 5
+
+
+# ------------------------------------------------------------------ ajustes finales de la re-auditoria
+def test_sku_creado_por_otro_entre_la_reclasificacion_y_el_guardado_no_da_500(adm, monkeypatch):
+    i = preparar(adm)
+    url = reverse("importar_vista_previa", args=[i.pk])
+    token = token_de(adm.get(url))            # la vista previa se ve ANTES de que alguien cree el sku
+    real = imp.clasificar
+
+    def clasifica_y_alguien_crea(filas):
+        r = real(filas)
+        Producto.objects.create(sku="A100", nombre="Creado por otro usuario")   # justo despues de clasificar
+        return r
+
+    monkeypatch.setattr(imp, "clasificar", clasifica_y_alguien_crea)
+    r = adm.post(url, {"token": token, "accion": "confirmar"})
+    assert r.status_code == 302 and r.url == url
+    monkeypatch.undo()
+    t = adm.get(r.url).content.decode()
+    assert "Otro usuario creó uno de estos códigos" in t
+    assert Producto.objects.count() == 0 and Movimiento.objects.count() == 0 and not Documento.objects.exists()
+    assert ImportacionEleventa.objects.get().estado == "vista_previa"
+
+
+def test_resumen_avisa_de_filas_que_pasaron_a_existentes_desde_la_vista_previa(adm):
+    i = preparar(adm)
+    url = reverse("importar_vista_previa", args=[i.pk])
+    token = token_de(adm.get(url))                                # el usuario ve la vista previa
+    assert ImportacionEleventa.objects.get().analisis["existentes_vistos"] == []
+    otro = Producto.objects.create(sku="A100", nombre="Creado despues")
+    adm.post(url, {"token": token, "accion": "confirmar"})
+    i.refresh_from_db()
+    assert i.resumen["pasaron_a_existentes"] == 1
+    assert servicios.stock_de(otro) == D("0.00")                  # no recibio stock
+    t = adm.get(reverse("importar_resumen", args=[i.pk])).content.decode()
+    assert "1 fila pasaron a existentes desde la vista previa y no recibieron stock" in t
+
+
+def test_sin_cambios_no_hay_aviso_de_pasaron_a_existentes(adm):
+    i = preparar(adm)
+    adm.get(reverse("importar_vista_previa", args=[i.pk]))
+    confirmar_http(adm, i)
+    i.refresh_from_db()
+    assert i.resumen["pasaron_a_existentes"] == 0
+    assert "pasaron a existentes" not in adm.get(reverse("importar_resumen", args=[i.pk])).content.decode()
+
+
+def test_el_analisis_se_vacia_al_confirmar_y_al_descartar(adm):
+    i = preparar(adm)
+    assert i.analisis
+    confirmar_http(adm, i)
+    i.refresh_from_db()
+    assert i.analisis == {} and i.resumen["creados"] == 3 and i.resumen["filas"] == 3
+    assert "Importación confirmada" in adm.get(reverse("importar_resumen", args=[i.pk])).content.decode()
+    j = preparar(adm, xlsx([["Z1", "Otro", 1, 1, 1, 1, 0, ""]]))
+    assert j.analisis
+    url = reverse("importar_vista_previa", args=[j.pk])
+    adm.post(url, {"token": token_de(adm.get(url)), "accion": "descartar"})
+    j.refresh_from_db()
+    assert j.estado == "descartada" and j.analisis == {}

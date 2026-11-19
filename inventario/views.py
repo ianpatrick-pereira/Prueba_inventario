@@ -521,6 +521,11 @@ class ImportarVistaPrevia(_ImportarBase, View):
         except importar_eleventa.ArchivoInvalido as e:
             messages.error(request, " ".join(e.messages))
             return redirect("importar_eleventa")
+        vistos = [f.codigo for f in filas if f.estado == "existente"]
+        if imp.analisis and imp.analisis.get("existentes_vistos") != vistos:
+            # Lo que el usuario vio como «existente»: al confirmar se avisa si cambio.
+            imp.analisis["existentes_vistos"] = vistos
+            imp.save(update_fields=["analisis"])
         pagina = _Paginator(filas, 100).get_page(request.GET.get("page"))
         return render(request, self.template_name, {
             "imp": imp, "resumen": importar_eleventa.resumir(filas), "pagina": pagina,

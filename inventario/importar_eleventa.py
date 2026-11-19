@@ -16,12 +16,12 @@ from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from . import servicios
 from .models import Categoria, Documento, ImportacionEleventa, Producto
-from .validadores import clave_nombre, normalizar_codigo, normalizar_nombre
+from .validadores import clave_nombre, normalizar_codigo
 
 # ----------------------------------------------------------------------------- mapeo de columnas
 # clave interna -> nombres posibles del encabezado (ya normalizados: ver _norm).
@@ -555,6 +555,16 @@ def confirmar(importacion_id, usuario, actualizar_existentes=False):
     if sha256(contenido) != imp.hash_sha256:
         raise ImportacionNoValida("El archivo guardado no coincide con el que se subió: vuelve a subirlo.")
     filas = analizar_contenido(contenido, imp.nombre_original)          # fuera de la transaccion
+    try:
+        return _aplicar(importacion_id, usuario, filas, actualizar_existentes)
+    except IntegrityError:
+        raise ImportacionNoValida(
+            "Otro usuario creó uno de estos códigos mientras confirmabas: no se importó nada. "
+            "Vuelve a revisar la vista previa."
+        )
+
+
+def _aplicar(importacion_id, usuario, filas, actualizar_existentes):
     with transaction.atomic():
         imp = ImportacionEleventa.objects.select_for_update().get(pk=importacion_id)
         if imp.estado != ImportacionEleventa.VISTA_PREVIA:
@@ -626,8 +636,11 @@ def confirmar(importacion_id, usuario, actualizar_existentes=False):
                 fecha=timezone.localdate(),
             )
             servicios.registrar_inventario_inicial_en_lote(con_stock, usuario, documento)
+        vistos = (imp.analisis or {}).get("existentes_vistos")
+        pasaron = (len({f.codigo for f in existentes} - set(vistos)) if vistos is not None else 0)
         resumen = resumir(filas)
         resumen.update({
+            "pasaron_a_existentes": pasaron,
             "creados": len(productos), "actualizados": actualizados, "productos_con_stock": len(con_stock),
             "unidades_cargadas": str(sum((c for _, c in con_stock), Decimal("0"))),
             "diferencias": diferencias,
@@ -639,9 +652,12 @@ def confirmar(importacion_id, usuario, actualizar_existentes=False):
         })
         imp.estado = ImportacionEleventa.CONFIRMADA
         imp.resumen = resumen
+        imp.analisis = {}  # el detalle fila a fila ya no hace falta: el resumen conserva lo esencial
         imp.documento = documento
         imp.save()
         return resumen
+
+
 
 
 def descartar(importacion_id, usuario):
@@ -651,4 +667,5 @@ def descartar(importacion_id, usuario):
         if imp.estado != ImportacionEleventa.VISTA_PREVIA:
             raise ImportacionNoValida("Esta importación ya no está en vista previa.")
         imp.estado = ImportacionEleventa.DESCARTADA
-        imp.save(update_fields=["estado"])
+        imp.analisis = {}
+        imp.save(update_fields=["estado", "analisis"])
