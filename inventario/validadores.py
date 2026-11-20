@@ -59,3 +59,19 @@ def neutralizar_para_planilla(texto):
     (empieza con =, +, - o @). Se usara al EXPORTAR a planilla; los datos se guardan sin alterar."""
     t = "" if texto is None else str(texto)
     return f"'{t}" if t.startswith(_INICIOS_DE_FORMULA) else t
+
+
+_MAX_CODIGO_ALTERNATIVO = 100
+
+
+def codigo_desde_descripcion(codigo, descripcion):
+    """D-62: si la descripcion (sin espacios en los extremos) NO tiene espacios internos y es distinta del
+    codigo, es un codigo real del producto y se guarda ademas como codigo alternativo.
+    Devuelve ese valor o "" (descripcion igual al codigo, con espacios, vacia, demasiado larga o que
+    empieza con =, +, -, @ o comillas: nunca se alteran ni se adivinan los codigos)."""
+    d = (descripcion or "").strip()
+    if not d or re.search(r"\s", d) or d == (codigo or "").strip() or len(d) > _MAX_CODIGO_ALTERNATIVO:
+        return ""
+    if d.startswith(("=", "+", "-", "@", '"')) or d.endswith('"'):
+        return ""
+    return d

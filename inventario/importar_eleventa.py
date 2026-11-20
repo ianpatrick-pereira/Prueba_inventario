@@ -21,8 +21,8 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from . import servicios
-from .models import Categoria, Documento, ImportacionEleventa, Producto
-from .validadores import clave_nombre, normalizar_codigo
+from .models import Categoria, CodigoAlternativo, Documento, ImportacionEleventa, Producto
+from .validadores import clave_nombre, codigo_desde_descripcion, normalizar_codigo
 
 # ----------------------------------------------------------------------------- mapeo de columnas
 # clave interna -> nombres posibles del encabezado (ya normalizados: ver _norm).
@@ -38,6 +38,10 @@ COLUMNAS = {
 }
 OBLIGATORIAS = ("codigo", "descripcion", "inventario")
 NOMBRES_VISIBLES = {"codigo": "Código", "descripcion": "Descripción", "inventario": "Inventario"}
+
+# Version de las REGLAS del analizador. Se incrementa cada vez que cambian: una importacion en vista previa
+# analizada con otra version se vuelve a analizar desde el archivo guardado (no se muestran errores viejos).
+ANALIZADOR_VERSION = 2
 
 MAX_BYTES = 5 * 1024 * 1024
 MAX_FILAS = 50000
@@ -360,13 +364,15 @@ class Fila:
     stock_sistema: Decimal | None = None
     diferencia: Decimal | None = None
     mala_lectura: bool = False    # advertencia de posible mala decodificacion de tildes
+    codigo_alt: str = ""          # D-62: codigo de la descripcion (candidato a codigo alternativo)
+    alt_crear: str = ""           # el que realmente se creara (sin conflicto); lo calcula clasificar()
 
     @property
     def valida(self):
         return not self.errores
 
     CAMPOS_GUARDADOS = ("numero", "codigo", "descripcion", "departamento", "costo", "precio_venta",
-                        "precio_mayoreo", "inventario", "minimo", "errores", "advertencias", "mala_lectura")
+                        "precio_mayoreo", "inventario", "minimo", "errores", "advertencias", "mala_lectura", "codigo_alt")
 
     def a_dict(self):
         """Forma guardable en JSON (los Decimal van como texto)."""
@@ -403,16 +409,18 @@ class Analisis(list):
         self.vacias = 0
         self.codificacion = None   # "UTF-8" | "Windows-1252" (solo texto)
         self.avisos = []           # avisos generales del archivo (vista previa)
+        self.version = ANALIZADOR_VERSION
 
     def a_json(self):
         return {"filas": [f.a_dict() for f in self], "omitidas": self.omitidas, "vacias": self.vacias,
-                "codificacion": self.codificacion, "avisos": self.avisos}
+                "codificacion": self.codificacion, "avisos": self.avisos, "version": self.version}
 
     @classmethod
     def de_json(cls, datos):
         a = cls(Fila.de_dict(d) for d in datos["filas"])
         a.omitidas, a.vacias = list(datos["omitidas"]), datos["vacias"]
         a.codificacion, a.avisos = datos.get("codificacion"), list(datos.get("avisos", []))
+        a.version = datos.get("version", 1)          # analisis guardados antes de existir la version: la 1
         return a
 
 
@@ -608,6 +616,7 @@ def analizar_contenido(contenido, nombre):
         adv, err = f.advertencias, f.errores
         f.codigo = _codigo(_valor(celdas, mapa, "codigo"), adv, err)
         f.descripcion = _texto(_valor(celdas, mapa, "descripcion"), adv, "Descripción")
+        f.codigo_alt = codigo_desde_descripcion(f.codigo, f.descripcion)
         f.departamento = _texto(_valor(celdas, mapa, "departamento"), adv, "Departamento")
         f.costo = _monto_clp(_valor(celdas, mapa, "costo"), adv, err, "Precio costo", es_texto)
         f.precio_venta = _monto_clp(_valor(celdas, mapa, "precio_venta"), adv, err, "Precio venta", es_texto)
@@ -695,7 +704,45 @@ def clasificar(filas):
         f.stock_sistema = Decimal(p.stock).quantize(CENTAVO)
         if f.inventario is not None:
             f.diferencia = f.inventario - f.stock_sistema
+    _resolver_alternativos(filas)
     return filas
+
+
+_PREFIJO_AVISO_ALT = "el código de la descripción"
+
+
+def _resolver_alternativos(filas):
+    """D-62: decide que codigos de descripcion se crearan como codigo alternativo (tipo «fabricante»).
+    Un valor que ya es sku de otro producto, codigo alternativo de OTRO producto, sku de otra fila del archivo
+    o descripcion-codigo de una fila anterior del mismo archivo no se crea: la fila lleva una advertencia.
+    Si el producto ya tiene ese alternativo no hay nada que crear (idempotente)."""
+    candidatos = sorted({f.codigo_alt for f in filas if f.valida and f.codigo_alt and not f.mala_lectura})
+    en_bd_alt, en_bd_sku = {}, set()
+    for lote in _en_lotes(candidatos):
+        for a in CodigoAlternativo.objects.filter(valor__in=lote).select_related("producto"):
+            en_bd_alt[a.valor] = a.producto.sku
+        en_bd_sku.update(Producto.objects.filter(sku__in=lote).values_list("sku", flat=True))
+    skus_del_archivo = {f.codigo for f in filas if f.valida}
+    vistos = {}
+    for f in filas:
+        f.alt_crear = ""
+        f.advertencias[:] = [a for a in f.advertencias if not a.startswith(_PREFIJO_AVISO_ALT)]
+        if not (f.valida and f.codigo_alt) or f.mala_lectura:
+            continue
+        x = f.codigo_alt
+        if x in en_bd_sku or x in skus_del_archivo:
+            dueno = x
+        elif x in en_bd_alt:
+            if en_bd_alt[x] == f.codigo:
+                continue                                      # este producto ya lo tiene: nada que crear
+            dueno = en_bd_alt[x]
+        elif x in vistos:
+            dueno = vistos[x]
+        else:
+            f.alt_crear = x
+            vistos[x] = f.codigo
+            continue
+        f.advertencias.append(f"{_PREFIJO_AVISO_ALT} {x} ya pertenece a {dueno}: no se crea como código alternativo.")
 
 
 def resumir(filas):
@@ -707,6 +754,8 @@ def resumir(filas):
         "con_advertencia": sum(bool(f.advertencias) and f.valida for f in filas),
         "con_error": sum(f.estado == "error" for f in filas),
         "unidades": str(sum((f.inventario or Decimal("0") for f in nuevas), Decimal("0"))),
+        "alternativos": sum(bool(f.alt_crear) for f in nuevas),
+        "alternativos_en_existentes": sum(bool(f.alt_crear) for f in filas if f.estado == "existente"),
     }
     if isinstance(filas, Analisis):
         r["omitidas"], r["vacias"] = len(filas.omitidas), filas.vacias
@@ -723,11 +772,24 @@ def analizar(importacion):
     return clasificar(analizar_contenido(_leer(importacion), importacion.nombre_original))
 
 
+def asegurar_analisis_vigente(importacion):
+    """Si el analisis guardado se hizo con otra version de las reglas (o no hay), se vuelve a analizar desde el
+    archivo guardado y se guarda. Devuelve True si se re-analizo."""
+    guardado = importacion.analisis or {}
+    if guardado and guardado.get("version", 1) == ANALIZADOR_VERSION:
+        return False
+    nuevo = analizar_contenido(_leer(importacion), importacion.nombre_original)
+    conservar = {k: guardado[k] for k in ("existentes_vistos",) if k in guardado}
+    importacion.analisis = {**nuevo.a_json(), **conservar}
+    importacion.save(update_fields=["analisis"])
+    return True
+
+
 def cargar_analisis(importacion):
-    """Vista previa: usa el analisis guardado al subir (sin releer el archivo)."""
-    if importacion.analisis:
-        return clasificar(Analisis.de_json(importacion.analisis))
-    return analizar(importacion)
+    """Vista previa: usa el analisis guardado al subir (sin releer el archivo) mientras su version sea la
+    vigente; si no, se re-analiza (ver asegurar_analisis_vigente)."""
+    asegurar_analisis_vigente(importacion)
+    return clasificar(Analisis.de_json(importacion.analisis))
 
 
 # ----------------------------------------------------------------------------- subida
@@ -849,6 +911,14 @@ def _aplicar(importacion_id, usuario, filas, actualizar_existentes):
                 batch_size=500,
             )
             actualizados = len(cambiados)
+        # D-62: codigo de la descripcion como codigo alternativo (nunca se borra ninguno)
+        alternativos = [CodigoAlternativo(producto=p, tipo="fabricante", valor=f.alt_crear)
+                        for p, f in zip(productos, nuevas) if f.alt_crear and not f.mala_lectura]
+        if actualizar_existentes and existentes:
+            alternativos += [CodigoAlternativo(producto=por_sku[f.codigo], tipo="fabricante", valor=f.alt_crear)
+                             for f in existentes if f.alt_crear]
+        if alternativos:
+            CodigoAlternativo.objects.bulk_create(alternativos, batch_size=500)
         # inventario inicial (solo productos nuevos con inventario > 0)
         con_stock = [(p, f.inventario) for p, f in zip(productos, nuevas)
                      if f.inventario is not None and f.inventario > 0]
@@ -865,6 +935,7 @@ def _aplicar(importacion_id, usuario, filas, actualizar_existentes):
         resumen = resumir(filas)
         resumen.update({
             "pasaron_a_existentes": pasaron,
+            "alternativos_creados": len(alternativos),
             "creados": len(productos), "actualizados": actualizados, "productos_con_stock": len(con_stock),
             "unidades_cargadas": str(sum((c for _, c in con_stock), Decimal("0"))),
             "diferencias": diferencias,

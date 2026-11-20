@@ -611,6 +611,11 @@ class ImportarSubir(_ImportarBase, View):
             form.add_error("archivo", f"Este archivo ya fue importado el {timezone.localtime(previa.fecha):%d-%m-%Y %H:%M}.")
             return render(request, self.template_name, {"form": form})
         if previa and previa.estado == ImportacionEleventa.VISTA_PREVIA:
+            try:
+                importar_eleventa.asegurar_analisis_vigente(previa)      # reglas nuevas: se vuelve a analizar
+            except importar_eleventa.ArchivoInvalido as e:
+                form.add_error("archivo", e.messages)
+                return render(request, self.template_name, {"form": form})
             messages.info(request, "Este archivo ya estaba subido: continúa desde su vista previa.")
             return redirect("importar_vista_previa", pk=previa.pk)
         if previa:  # descartada: se reemplaza por una nueva vista previa

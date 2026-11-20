@@ -17,6 +17,7 @@
     <div class="tarjeta"><div class="etiqueta-cifra">Filas con advertencia</div><div class="cifra">{{ resumen.con_advertencia }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Filas con error (no se importan)</div><div class="cifra{% if resumen.con_error %} alerta{% endif %}">{{ resumen.con_error }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Unidades totales a cargar</div><div class="cifra">{{ resumen.unidades|cantidad }}</div></div>
+    <div class="tarjeta"><div class="etiqueta-cifra">Códigos alternativos que se crearán</div><div class="cifra">{{ resumen.alternativos }}</div>{% if resumen.alternativos_en_existentes %}<div class="ayuda">+ {{ resumen.alternativos_en_existentes }} en productos existentes si marcas «actualizar»</div>{% endif %}</div>
   </div>
   <p class="ayuda">Filas omitidas (totales): {{ resumen.omitidas }}</p>
   {% if omitidas %}<div class="tarjeta"><strong>Filas omitidas por ser totales:</strong>
@@ -33,13 +34,15 @@
   </form>
   <div class="tabla-scroll alta">
   <table>
-    <thead><tr><th>Fila</th><th>Código</th><th>Descripción</th><th class="num">Inventario</th><th class="num">Costo</th><th>Estado</th><th>Mensajes</th></tr></thead>
+    <thead><tr><th>Fila</th><th>Código</th><th>Descripción</th><th class="num">Inventario</th><th class="num">Costo</th><th class="num">Precio venta</th><th>Código de la descripción</th><th>Estado</th><th>Mensajes</th></tr></thead>
     <tbody>
     {% for f in pagina %}
       <tr{% if f.estado == "error" %} class="bajo"{% endif %}>
         <td>{{ f.numero }}</td><td class="mono">{{ f.codigo|default:"-" }}</td><td>{{ f.descripcion|default:"-" }}</td>
         <td class="num">{% if f.inventario is None %}-{% else %}{{ f.inventario|cantidad }}{% endif %}</td>
         <td class="num">{{ f.costo|pesos }}</td>
+        <td class="num">{{ f.precio_venta|pesos }}</td>
+        <td class="mono">{% if f.alt_crear %}{{ f.alt_crear }} <span class="ayuda">(alternativo)</span>{% else %}-{% endif %}</td>
         <td>{% if f.estado == "nueva" %}<span class="insignia insignia-nueva">Nueva</span>{% elif f.estado == "existente" %}<span class="insignia insignia-existente">Existente</span>{% else %}<span class="insignia insignia-error">Error</span>{% endif %}
             {% if f.advertencias and f.estado != "error" %}<span class="insignia insignia-aviso">advertencia</span>{% endif %}</td>
         <td>

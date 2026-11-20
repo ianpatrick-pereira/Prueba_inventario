@@ -13,6 +13,7 @@
     <div class="tarjeta"><div class="etiqueta-cifra">Productos creados</div><div class="cifra">{{ r.creados }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Productos con stock cargado</div><div class="cifra">{{ r.productos_con_stock }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Unidades cargadas</div><div class="cifra">{{ r.unidades_cargadas|cantidad }}</div></div>
+    <div class="tarjeta"><div class="etiqueta-cifra">Códigos alternativos creados</div><div class="cifra">{{ r.alternativos_creados|default:0 }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Existentes actualizados</div><div class="cifra">{{ r.actualizados }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Filas con error (no importadas)</div><div class="cifra{% if r.con_error %} alerta{% endif %}">{{ r.con_error }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Filas omitidas (totales)</div><div class="cifra">{{ r.omitidas|length }}</div></div>
