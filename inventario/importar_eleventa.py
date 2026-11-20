@@ -90,16 +90,51 @@ def _acotar(filas):
         yield fila
 
 
-def _filas_csv(contenido):
-    try:
-        texto = contenido.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        texto = contenido.decode("latin-1")
-    for delim in (";", ","):
+MSG_OLE = ("Este archivo es Excel 97-2003, que el sistema no lee. "
+           "Expórtalo de nuevo desde Eleventa o guárdalo como .xlsx")
+MSG_BINARIO = ("El archivo no parece ser de texto (contiene datos binarios). "
+               "Expórtalo de nuevo desde Eleventa o guárdalo como .xlsx o .csv.")
+_FIRMA_OLE = b"\xd0\xcf\x11\xe0"
+_CONTROL = bytes(set(range(32)) - {9, 10, 13})      # control que no es TAB, LF ni CR
+
+
+def detectar_formato(contenido):
+    """D-59: el formato se decide por el CONTENIDO, nunca por la extension.
+
+    - «PK» -> "xlsx" (paquete zip de Excel);
+    - firma D0 CF 11 E0 (Excel 97-2003 real, OLE) -> ArchivoInvalido con mensaje claro;
+    - texto delimitado (TAB, «;» o «,») -> "texto"; con datos binarios -> ArchivoInvalido.
+    Eleventa exporta texto separado por tabulaciones y lo guarda como «.xls»."""
+    if contenido[:2] == b"PK":
+        return "xlsx"
+    if contenido[:4] == _FIRMA_OLE:
+        raise ArchivoInvalido(MSG_OLE)
+    if contenido.translate(None, _CONTROL) != contenido:
+        raise ArchivoInvalido(MSG_BINARIO)
+    return "texto"
+
+
+def decodificar_texto(contenido):
+    """UTF-8 (con o sin BOM); si falla, Windows-1252 (comillas curvas, «€»…); como ultimo
+    recurso Latin-1, que acepta cualquier byte."""
+    for codec in ("utf-8-sig", "cp1252"):
         try:
-            yield [list(f) for f in _acotar(csv.reader(io.StringIO(texto), delimiter=delim))]
+            return contenido.decode(codec)
+        except UnicodeDecodeError:
+            continue
+    return contenido.decode("latin-1")
+
+
+def _filas_texto(contenido):
+    """Un solo camino para texto delimitado (.csv, .xls de Eleventa...): prueba TAB, «;» y «,»
+    y entrega las filas de cada uno; leer_tabla se queda con el que trae los encabezados."""
+    texto = decodificar_texto(contenido)
+    for delim in ("\t", ";", ","):
+        try:
+            # newline="": respeta LF, CRLF y CR solo (sin traducir) para que csv los separe bien
+            yield [list(f) for f in _acotar(csv.reader(io.StringIO(texto, newline=""), delimiter=delim))]
         except csv.Error:
-            raise ArchivoInvalido("El archivo .csv está mal formado (por ejemplo, una celda enorme o comillas sin cerrar).")
+            raise ArchivoInvalido("El archivo de texto está mal formado (por ejemplo, una celda enorme o comillas sin cerrar).")
 
 
 def _ubicar_encabezados(filas):
@@ -118,10 +153,9 @@ def _ubicar_encabezados(filas):
 
 def leer_tabla(contenido, nombre):
     """Devuelve (mapa, filas): `filas` = [(numero_de_fila_en_el_archivo, [celdas])]."""
-    es_csv = nombre.lower().endswith(".csv")
     if len(contenido) > MAX_BYTES:
         raise ArchivoInvalido("El archivo supera el máximo de 5 MB.")
-    candidatas = _filas_csv(contenido) if es_csv else _filas_xlsx(contenido)
+    candidatas = _filas_xlsx(contenido) if detectar_formato(contenido) == "xlsx" else _filas_texto(contenido)
     for filas in candidatas:
         ubicado = _ubicar_encabezados(filas)
         if ubicado:
@@ -517,14 +551,12 @@ def validar_subida(nombre, contenido):
     """Validaciones de la subida: extension, tamano, formato real y columnas. Devuelve el
     Analisis (para guardarlo). Lanza ArchivoInvalido con un mensaje claro."""
     n = (nombre or "").lower()
-    if not (n.endswith(".xlsx") or n.endswith(".csv")):
-        raise ArchivoInvalido("Solo se aceptan archivos .xlsx o .csv.")
+    if not n.endswith((".xls", ".xlsx", ".csv")):       # la extension solo filtra; el formato se decide por contenido
+        raise ArchivoInvalido("Solo se aceptan archivos .xls, .xlsx o .csv.")
     if not contenido:
         raise ArchivoInvalido("El archivo está vacío.")
     if len(contenido) > MAX_BYTES:
         raise ArchivoInvalido("El archivo supera el máximo de 5 MB.")
-    if n.endswith(".csv") and b"\x00" in contenido[:4096]:
-        raise ArchivoInvalido("El archivo .csv no parece ser de texto.")
     return analizar_contenido(contenido, nombre)
 
 

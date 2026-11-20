@@ -260,7 +260,7 @@ from . import importar_eleventa as _imp  # noqa: E402
 
 
 class SubirEleventaForm(forms.Form):
-    archivo = forms.FileField(label="Archivo exportado de Eleventa (.xlsx o .csv, máximo 5 MB)")
+    archivo = forms.FileField(label="Archivo exportado de Eleventa (.xls, .xlsx o .csv, máximo 5 MB)")
 
     def clean_archivo(self):
         f = self.cleaned_data["archivo"]
@@ -269,6 +269,7 @@ class SubirEleventaForm(forms.Form):
         contenido = f.read(_imp.MAX_BYTES + 1)
         try:
             self.analisis = _imp.validar_subida(f.name, contenido)
+            self.formato = _imp.detectar_formato(contenido)
         except _imp.ArchivoInvalido as e:
             raise forms.ValidationError(e.messages)
         self.contenido = contenido
