@@ -243,3 +243,67 @@ def test_texto_enorme_en_una_celda_es_error_no_500(adm):
 def test_mas_de_5_mb_sigue_rechazado_en_xls(adm):
     r = subir(adm, b"a" * (5 * 1024 * 1024 + 1), "G.xls")
     assert "5 MB" in r.content.decode() and ImportacionEleventa.objects.count() == 0
+
+
+# ------------------------------------------------------------------ comillas de pulgadas (QUOTE_NONE solo con TAB)
+DESCRIPCIONES = ['MANGUERA 1/2"', '"OFERTA" FILTRO DE AIRE', 'FILTRO 3/4" X 16', '"sin cerrar', 'TUBO 1" y 2" doble', 'CON "COMILLA" EN MEDIO']
+
+
+def _filas_con_comillas():
+    return [[f"Q{i}", d, "1.234,50", "2.500,00", "2.000,00", str(i + 1), "1", "Mangueras"] for i, d in enumerate(DESCRIPCIONES)]
+
+
+@pytest.mark.parametrize("nl", ["\n", "\r\n", "\r"])
+def test_xls_con_tab_y_comillas_sueltas_o_en_pares_separa_cada_fila_y_conserva_el_texto(nl):
+    filas = imp.analizar_contenido(texto(filas=_filas_con_comillas(), nl=nl).encode("cp1252"), "FILTROS.xls")
+    assert [f.codigo for f in filas] == [f"Q{i}" for i in range(len(DESCRIPCIONES))]          # ninguna fila se junto
+    assert [f.descripcion for f in filas] == DESCRIPCIONES                                    # texto tal cual, comillas incluidas
+    assert [f.inventario for f in filas] == [D(i + 1) for i in range(len(DESCRIPCIONES))]
+    assert all(f.valida and f.costo == D("1234.50") for f in filas)
+
+
+def test_la_comilla_suelta_no_se_come_caracteres_ni_filas_siguientes():
+    contenido = (ENCABEZADO_REAL + '\nA1\tMANGUERA 1/2"\t1\t1\t1\t5\t0\tMang\nA2\tOTRA\t1\t1\t1\t6\t0\tMang\nA3\t"abierta\t1\t1\t1\t7\t0\tMang\nA4\tFINAL\t1\t1\t1\t8\t0\tMang\n').encode("utf-8")
+    filas = imp.analizar_contenido(contenido, "F.xls")
+    assert [(f.codigo, f.descripcion, f.inventario) for f in filas] == [
+        ("A1", 'MANGUERA 1/2"', D(5)), ("A2", "OTRA", D(6)), ("A3", '"abierta', D(7)), ("A4", "FINAL", D(8))]
+
+
+def test_subida_confirmacion_de_un_xls_con_comillas_de_pulgadas(adm):
+    r = subir(adm, texto(filas=_filas_con_comillas()).encode("cp1252"), "FILTROS.xls")
+    assert r.status_code == 302
+    i = ImportacionEleventa.objects.get()
+    url = reverse("importar_vista_previa", args=[i.pk])
+    token = re.search(r'name="token" value="([^"]+)"', adm.get(url).content.decode()).group(1)
+    adm.post(url, {"token": token, "accion": "confirmar"})
+    assert dict(Producto.objects.values_list("sku", "nombre")) == {f"Q{i}": d for i, d in enumerate(DESCRIPCIONES)}
+
+
+def test_csv_con_coma_y_campos_entre_comillas_sigue_funcionando():
+    contenido = (
+        "Codigo,Descripcion,Precio Costo,Precio Venta,Precio Mayoreo,Inventario,Inv. Minimo,Departamento\n"
+        '0077,"Filtro, de aceite",1234.50,2500.00,2000.00,10,2,"Filtros, varios"\n'
+        'A100,"Manguera ""reforzada"" 1/2",5990.00,9990.00,8500.00,5,1,Aceites\n'
+    ).encode("utf-8")
+    filas = imp.analizar_contenido(contenido, "x.csv")
+    assert [f.codigo for f in filas] == ["0077", "A100"]
+    assert filas[0].descripcion == "Filtro, de aceite" and filas[0].departamento == "Filtros, varios"
+    assert filas[1].descripcion == 'Manguera "reforzada" 1/2'                      # comillas dobles escapadas
+
+
+def test_csv_con_punto_y_coma_y_campos_entre_comillas_sigue_funcionando():
+    contenido = (
+        "Codigo;Descripcion;Precio Costo;Precio Venta;Precio Mayoreo;Inventario;Inv. Minimo;Departamento\n"
+        '0077;"Filtro; de aceite";1.234,50;2.500,00;2.000,00;10;2;Filtros\n'
+    ).encode("utf-8")
+    filas = imp.analizar_contenido(contenido, "x.csv")
+    assert filas[0].descripcion == "Filtro; de aceite" and filas[0].costo == D("1234.50")
+
+
+def test_el_lector_de_texto_usa_quote_none_solo_con_tab():
+    import csv
+    import inspect
+
+    fuente = inspect.getsource(imp._filas_texto)
+    assert "csv.QUOTE_NONE" in fuente and 'delim == "\\t"' in fuente
+    assert csv.QUOTE_NONE != csv.QUOTE_MINIMAL

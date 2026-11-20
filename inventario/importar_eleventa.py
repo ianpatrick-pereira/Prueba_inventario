@@ -130,9 +130,13 @@ def _filas_texto(contenido):
     y entrega las filas de cada uno; leer_tabla se queda con el que trae los encabezados."""
     texto = decodificar_texto(contenido)
     for delim in ("\t", ";", ","):
+        # Con TAB las comillas son texto literal (QUOTE_NONE): en un lubricentro las descripciones traen
+        # pulgadas («MANGUERA 1/2"») y una comilla suelta juntaria filas; en la exportacion de Eleventa el
+        # TAB nunca aparece dentro de una celda. Con «;» y «,» se mantiene el manejo normal de comillas.
+        opciones = {"quoting": csv.QUOTE_NONE} if delim == "\t" else {}
         try:
             # newline="": respeta LF, CRLF y CR solo (sin traducir) para que csv los separe bien
-            yield [list(f) for f in _acotar(csv.reader(io.StringIO(texto, newline=""), delimiter=delim))]
+            yield [list(f) for f in _acotar(csv.reader(io.StringIO(texto, newline=""), delimiter=delim, **opciones))]
         except csv.Error:
             raise ArchivoInvalido("El archivo de texto está mal formado (por ejemplo, una celda enorme o comillas sin cerrar).")
 
