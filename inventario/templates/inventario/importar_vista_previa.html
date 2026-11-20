@@ -8,6 +8,8 @@
       <p class="subtitulo">Archivo: <strong>{{ imp.nombre_original }}</strong></p>
     </div>
   </div>
+  {% if avisos %}<ul class="mensajes" role="status">{% for a in avisos %}<li class="warning">{{ a }}</li>{% endfor %}</ul>{% endif %}
+  {% if codificacion %}<p class="ayuda">Codificación detectada: <strong>{{ codificacion }}</strong></p>{% endif %}
   <div class="rejilla tres">
     <div class="tarjeta"><div class="etiqueta-cifra">Filas leídas</div><div class="cifra">{{ resumen.filas }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Productos nuevos</div><div class="cifra">{{ resumen.nuevas }}</div></div>
