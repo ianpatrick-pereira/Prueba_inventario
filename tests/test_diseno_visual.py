@@ -45,7 +45,7 @@ def html(r):
 # ------------------------------------------------------------------ hoja de estilos
 def test_base_enlaza_sistema_css_con_static_y_sin_estilo_en_linea():
     fuente = (RAIZ / "cuentas" / "templates" / "base.html").read_text(encoding="utf-8")
-    assert "{% static 'css/sistema.css' %}" in fuente
+    assert "{% static_v 'css/sistema.css' %}" in fuente
     assert "<style" not in fuente
 
 
@@ -58,12 +58,12 @@ def test_ninguna_plantilla_tiene_estilo_en_linea_ni_urls_externas():
         assert not re.search(r"https?://", t), p
         assert "onchange=" not in t and "onclick=" not in t, p
         scripts = re.findall(r"<script[^>]*>", t)          # D-58: solo UN script propio, local y con defer
-        assert all("{% static 'js/sistema.js' %}" in x and "defer" in x for x in scripts), p
+        assert all("{% static_v 'js/sistema.js' %}" in x and "defer" in x for x in scripts), p
 
 
 def test_la_pagina_renderizada_enlaza_el_css_local(adm):
     t = html(adm.get("/"))
-    assert 'href="/static/css/sistema.css"' in t and "<style" not in t and "http://" not in t and "https://" not in t
+    assert re.search(r'href="/static/css/sistema.css\?v=[0-9a-f]{10}"', t) and "<style" not in t and "http://" not in t and "https://" not in t
 
 
 def test_el_css_existe_se_encuentra_y_se_sirve_con_200():

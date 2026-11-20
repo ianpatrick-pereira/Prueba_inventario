@@ -4,13 +4,19 @@
   "use strict";
   document.documentElement.classList.add("con-js");
 
-  // Atajo «/»: enfoca el buscador de la pagina (se ignora si ya se esta escribiendo en un campo).
+  // Atajos de busqueda: «/» (Shift+7 en teclado latinoamericano, o el «/» del teclado numerico) y
+  // Ctrl+K (Cmd+K en Mac). Enfocan el buscador de la pagina; si no hay buscador, no se hace nada.
   document.addEventListener("keydown", function (e) {
+    var buscador = document.querySelector("input[type=search]");
+    if (!buscador) { return; }
+    var esCtrlK = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "k" || e.key === "K");
+    if (esCtrlK) {  // funciona tambien mientras se escribe en otro campo
+      e.preventDefault(); buscador.focus(); buscador.select(); return;
+    }
     if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) { return; }
     var a = document.activeElement, tag = a && a.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (a && a.isContentEditable)) { return; }
-    var buscador = document.querySelector("input[type=search]");
-    if (buscador) { e.preventDefault(); buscador.focus(); buscador.select(); }
+    e.preventDefault(); buscador.focus(); buscador.select();
   });
 
   // Botones «Imprimir» (data-imprimir): abren el cuadro de impresion del navegador.

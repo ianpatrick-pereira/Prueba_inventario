@@ -15,7 +15,7 @@
       <input type="search" name="q" value="{{ q }}" placeholder="Código, código de proveedor o nombre" autofocus aria-label="Buscar productos">
       <button type="submit">Buscar</button>
     </div>
-    <span class="pista">Presiona <kbd>/</kbd> para buscar</span>
+    <span class="pista">Presiona <kbd>/</kbd> o <kbd>Ctrl</kbd>+<kbd>K</kbd> para buscar</span>
     {% if categoria_param != "" %}<input type="hidden" name="categoria" value="{{ categoria_param }}">{% endif %}
     {% if bajo_minimo %}<input type="hidden" name="bajo_minimo" value="1">{% endif %}
     {% if q %}<a class="boton secundario" href="{% if bajo_minimo %}?bajo_minimo=1{% else %}{% url 'producto_lista' %}{% endif %}">Limpiar</a>{% endif %}

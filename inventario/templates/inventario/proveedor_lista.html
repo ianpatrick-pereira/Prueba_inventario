@@ -10,7 +10,7 @@
       <input type="search" name="q" value="{{ q }}" placeholder="Nombre o RUT" autofocus aria-label="Buscar proveedores">
       <button type="submit">Buscar</button>
     </div>
-    <span class="pista">Presiona <kbd>/</kbd> para buscar</span>
+    <span class="pista">Presiona <kbd>/</kbd> o <kbd>Ctrl</kbd>+<kbd>K</kbd> para buscar</span>
     {% if q %}<a class="boton secundario" href="{% url 'proveedor_lista' %}">Limpiar</a>{% endif %}
   </form>
   {% if proveedores %}

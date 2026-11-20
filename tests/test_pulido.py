@@ -366,7 +366,7 @@ def test_sistema_js_se_sirve_y_no_depende_de_nada_externo():
 
 def test_la_pagina_carga_un_solo_script_propio_con_defer(adm):
     t = html(adm.get(reverse("producto_lista")))
-    assert re.findall(r"<script[^>]*>", t) == ['<script src="/static/js/sistema.js" defer>']
+    assert re.fullmatch(r'<script src="/static/js/sistema.js\?v=[0-9a-f]{10}" defer>', "".join(re.findall(r"<script[^>]*>", t)))
     assert "onclick=" not in t and "onchange=" not in t
 
 
@@ -375,7 +375,7 @@ def test_sin_js_nada_depende_de_el(adm):
     assert re.search(r"\.pista\s*\{\s*display:\s*none", CSS) and re.search(r"\.solo-js\s*\{\s*display:\s*none", CSS)
     assert ".con-js .pista" in CSS and ".con-js .solo-js" in CSS
     t = html(adm.get(reverse("producto_lista")))
-    assert "autofocus" in t and 'type="search"' in t and "Presiona <kbd>/</kbd> para buscar" in t
+    assert "autofocus" in t and 'type="search"' in t and "Presiona <kbd>/</kbd> o <kbd>Ctrl</kbd>+<kbd>K</kbd> para buscar" in t
     assert '<form method="get" class="herramientas" role="search">' in t          # la busqueda funciona con un GET normal
 
 
@@ -527,3 +527,15 @@ def test_al_editar_se_muestra_el_codigo_fijo_en_la_primera_posicion(adm):
     ident = t.split("<h2>Identificación</h2>")[1].split("</section>")[0]
     assert '<div class="valor-fijo mono">FIJO</div>' in ident and 'name="sku"' not in t
     assert ident.index("valor-fijo") < ident.index('for="id_nombre"') < ident.index('for="id_categoria"') < ident.index('for="id_unidad"')
+
+
+def test_atajo_ctrl_k_y_cmd_k_enfocan_el_buscador_y_la_pista_lo_dice(adm):
+    js = (RAIZ / "cuentas" / "static" / "js" / "sistema.js").read_text(encoding="utf-8")
+    assert "e.ctrlKey || e.metaKey" in js and '"k"' in js and '"K"' in js        # Ctrl+K y Cmd+K (mayuscula incluida)
+    # preventDefault solo despues de comprobar que hay buscador en la pagina
+    assert js.index("if (!buscador) { return; }") < js.index("e.preventDefault(); buscador.focus()")
+    assert '"/"' in js and "isContentEditable" in js                             # «/» se mantiene
+    for nombre in ("producto_lista", "proveedor_lista"):
+        t = html(adm.get(reverse(nombre)))
+        assert "Presiona <kbd>/</kbd> o <kbd>Ctrl</kbd>+<kbd>K</kbd> para buscar" in t, nombre
+        assert "Presiona <kbd>/</kbd> para buscar" not in t
