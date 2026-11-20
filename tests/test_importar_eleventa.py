@@ -342,9 +342,9 @@ def test_vista_previa_conteos_y_mensajes(adm):
     i = preparar(adm, xlsx(filas))
     r = adm.get(reverse("importar_vista_previa", args=[i.pk]))
     res = r.context["resumen"]
-    assert res["filas"] == 9 and res["con_error"] == 4            # 2 duplicadas + codigo vacio + desc vacia
-    assert res["existentes"] == 1 and res["nuevas"] == 4
-    assert res["con_advertencia"] == 3                           # costo 0, inventario malo, inventario negativo (+N2.. ver abajo)
+    assert res["filas"] == 9 and res["con_error"] == 5            # 2 duplicadas + codigo vacio + desc vacia + inventario «abc»
+    assert res["existentes"] == 1 and res["nuevas"] == 3
+    assert res["con_advertencia"] == 2                           # costo 0 e inventario negativo
     assert D(res["unidades"]) == D("8")                          # solo N1 (5) y N2 (3)
     por = {(f.codigo, f.numero): f for f in r.context["pagina"]}
     dup = [f for f in r.context["pagina"] if f.codigo == "DUP"]
@@ -353,9 +353,10 @@ def test_vista_previa_conteos_y_mensajes(adm):
     assert any("Descripción vacía." in f.errores for f in r.context["pagina"])
     n2 = next(f for f in r.context["pagina"] if f.codigo == "N2")
     assert any("Costo en 0" in a for a in n2.advertencias)
-    for cod in ("N4", "N5"):
-        f = next(f for f in r.context["pagina"] if f.codigo == cod)
-        assert f.inventario is None and any("sin stock" in a for a in f.advertencias)
+    n4 = next(f for f in r.context["pagina"] if f.codigo == "N4")                  # texto no numerico: ERROR de fila
+    assert n4.estado == "error" and any("Inventario: texto no numérico" in e for e in n4.errores)
+    n5 = next(f for f in r.context["pagina"] if f.codigo == "N5")                  # negativo: se importa sin stock, con aviso
+    assert n5.inventario is None and any("sin stock" in a for a in n5.advertencias)
     ex = next(f for f in r.context["pagina"] if f.codigo == "A100")
     assert ex.estado == "existente" and ex.diferencia == D("8")
     assert Producto.objects.count() == 1 and Movimiento.objects.count() == 0   # la vista previa no guarda nada
@@ -433,10 +434,10 @@ def test_filas_con_error_no_se_importan_pero_se_listan(adm):
     assert "Código vacío." in adm.get(reverse("importar_resumen", args=[i.pk])).content.decode()
 
 
-def test_inventario_negativo_o_no_numerico_se_importa_sin_stock(adm):
+def test_inventario_negativo_se_importa_sin_stock_y_no_numerico_es_error(adm):
     i = preparar(adm, xlsx([["N1", "Neg", 1, 1, 1, -3, 0, ""], ["N2", "Txt", 1, 1, 1, "x", 0, ""]]))
     confirmar_http(adm, i)
-    assert Producto.objects.count() == 2 and Movimiento.objects.count() == 0
+    assert list(Producto.objects.values_list("sku", flat=True)) == ["N1"] and Movimiento.objects.count() == 0
     assert not Documento.objects.exists()
 
 

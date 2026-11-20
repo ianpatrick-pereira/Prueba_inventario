@@ -333,11 +333,13 @@ def test_punto_y_coma_sin_comillas_dentro_de_la_descripcion_en_csv_es_error():
     assert not f.valida and "La fila tiene 9 columnas y el encabezado 8" in f.errores[0]
 
 
-def test_columnas_extra_vacias_al_final_se_aceptan():
-    lineas = [ENCABEZADO_REAL, "0077\tFiltro\t1.234,50\t2.500,00\t2.000,00\t10\t2\tFiltros\t",
-              "A100\tAceite\t1.000,00\t2.000,00\t1.500,00\t5\t1\tAceites\t\t\t"]
+def test_si_todo_el_archivo_trae_una_columna_vacia_de_mas_es_normal_y_se_acepta():
+    lineas = [ENCABEZADO_REAL + "\t", "0077\tFiltro\t1.234,50\t2.500,00\t2.000,00\t10\t2\tFiltros\t",
+              "A100\tAceite\t1.000,00\t2.000,00\t1.500,00\t5\t1\t\t", "B1\tBujia\t1\t2\t3\t4\t0\tD\t"]
     filas = imp.analizar_contenido(("\n".join(lineas) + "\n").encode("cp1252"), "F.xls")
-    assert [f.valida for f in filas] == [True, True] and filas[1].inventario == D(5)
+    assert [f.valida for f in filas] == [True, True, True] and filas[1].inventario == D(5)
+    tres = [ENCABEZADO_REAL] + [l + "\t\t\t" for l in lineas[1:]]                   # incluso tres columnas vacias de mas
+    assert all(f.valida for f in imp.analizar_contenido(("\n".join(tres) + "\n").encode("cp1252"), "F.xls"))
 
 
 def test_fila_mas_corta_se_acepta_con_lo_que_hay_si_estan_las_obligatorias():
@@ -466,3 +468,87 @@ def test_nul_o_ctrl_z_en_medio_siguen_siendo_binario():
         con = texto().encode("cp1252").replace(b"Filtro", b"Fil" + malo + b"tro", 1)
         with pytest.raises(imp.ArchivoInvalido, match="no parece ser de texto"):
             imp.analizar_contenido(con, "F.xls")
+
+
+# ------------------------------------------------------------------ columnas CRUDAS (con vacias) frente a la moda del archivo
+def _archivo(*filas, cab=ENCABEZADO_REAL):
+    return (cab + "\n" + "\n".join(filas) + "\n").encode("cp1252")
+
+
+NORMAL_SIN_DEPTO = "B1\tNORMAL\t1.000,00\t2.000,00\t1.500,00\t3\t1\t"            # 8 celdas crudas, Departamento vacio
+TAB_EN_DESCRIPCION = "0077\tMANGUERA\t1/2 REFORZADA\t1.234,50\t2.500,00\t2.000,00\t10\t2\t"   # 9 crudas, ultima vacia
+
+
+def test_tab_en_la_descripcion_con_departamento_vacio_es_error_aunque_la_celda_extra_este_vacia(adm):
+    contenido = _archivo(TAB_EN_DESCRIPCION, NORMAL_SIN_DEPTO, "C2\tOTRO\t1\t2\t3\t4\t0\t")
+    a = imp.analizar_contenido(contenido, "F.xls")
+    assert not a[0].valida and "La fila tiene 9 columnas y el resto del archivo 8: revisa la descripción en Eleventa." in a[0].errores
+    assert a[1].valida and a[2].valida
+    subir(adm, contenido)
+    i = ImportacionEleventa.objects.get()
+    url = reverse("importar_vista_previa", args=[i.pk])
+    token = re.search(r'name="token" value="([^"]+)"', adm.get(url).content.decode()).group(1)
+    adm.post(url, {"token": token, "accion": "confirmar"})
+    assert sorted(Producto.objects.values_list("sku", flat=True)) == ["B1", "C2"]        # el precio mayoreo NO terminó como inventario
+    assert not Producto.objects.filter(sku="0077").exists()
+
+
+def test_archivo_donde_todas_las_filas_traen_un_tab_final_extra_se_acepta(adm):
+    filas = [f + "\t" for f in (NORMAL_SIN_DEPTO, "C2\tOTRO\t1\t2\t3\t4\t0\tD", "D3\tUNO MAS\t5\t6\t7\t8\t1\t")]
+    a = imp.analizar_contenido(_archivo(*filas), "F.xls")
+    assert all(f.valida for f in a) and [f.inventario for f in a] == [D(3), D(4), D(8)]
+    assert subir(adm, _archivo(*filas)).status_code == 302
+
+
+def test_en_un_archivo_con_una_columna_de_mas_una_fila_con_aun_mas_es_error():
+    base = [f + "\t" for f in (NORMAL_SIN_DEPTO, "C2\tOTRO\t1\t2\t3\t4\t0\tD", "D3\tUNO\t5\t6\t7\t8\t1\t")]
+    a = imp.analizar_contenido(_archivo(*base, "E4\tTAB\tDE MAS\t1\t2\t3\t4\t0\t\t"), "F.xls")
+    assert [f.valida for f in a] == [True, True, True, False]
+    assert "La fila tiene 10 columnas y el resto del archivo 9" in a[3].errores[0]
+
+
+def test_la_moda_es_la_cantidad_mas_frecuente_y_en_empate_se_marca_la_mas_larga():
+    a = imp.analizar_contenido(_archivo(NORMAL_SIN_DEPTO, TAB_EN_DESCRIPCION), "F.xls")     # 8 vs 9, una de cada
+    assert [f.valida for f in a] == [True, False]
+    muchas = imp.analizar_contenido(_archivo(*[f"P{i}\tX\t1\t1\t1\t{i}\t0\t" for i in range(5)], TAB_EN_DESCRIPCION), "F.xls")
+    assert [f.valida for f in muchas] == [True] * 5 + [False]
+
+
+def test_filas_cortas_no_son_error_por_la_moda():
+    a = imp.analizar_contenido(_archivo(NORMAL_SIN_DEPTO, "C2\tCORTA\t1\t2\t3\t4", NORMAL_SIN_DEPTO.replace("B1", "B2")), "F.xls")
+    assert all(f.valida for f in a)
+
+
+def test_las_filas_de_totales_y_vacias_no_alteran_la_moda():
+    a = imp.analizar_contenido(_archivo("", NORMAL_SIN_DEPTO, "\tTotales\t\t\t\t99", "C2\tOTRO\t1\t2\t3\t4\t0\t"), "F.xls")
+    assert [f.valida for f in a] == [True, True]
+
+
+# ------------------------------------------------------------------ texto no numerico: error en Inventario e Inv. Minimo
+def test_inventario_con_texto_no_numerico_es_error_y_no_se_carga(adm):
+    contenido = _archivo("A1\tX\t1\t1\t1\tmuchos\t0\tD", "A2\tY\t1\t1\t1\t5\t0\tD")
+    a = imp.analizar_contenido(contenido, "F.xls")
+    assert not a[0].valida and "Inventario: texto no numérico («muchos»)" in a[0].errores[0] and a[1].valida
+    subir(adm, contenido)
+    i = ImportacionEleventa.objects.get()
+    url = reverse("importar_vista_previa", args=[i.pk])
+    token = re.search(r'name="token" value="([^"]+)"', adm.get(url).content.decode()).group(1)
+    adm.post(url, {"token": token, "accion": "confirmar"})
+    assert list(Producto.objects.values_list("sku", flat=True)) == ["A2"]
+
+
+def test_inv_minimo_con_texto_no_numerico_es_error():
+    f = imp.analizar_contenido(_archivo("A1\tX\t1\t1\t1\t5\tpoco\tD"), "F.xls")[0]
+    assert not f.valida and "Inv. mínimo: texto no numérico («poco»)" in f.errores[0]
+
+
+def test_precio_con_texto_no_numerico_sigue_siendo_advertencia_y_queda_en_0():
+    f = imp.analizar_contenido(_archivo("A1\tX\tgratis\t$\tn/a\t5\t0\tD"), "F.xls")[0]
+    assert f.valida and f.costo == D(0) and f.precio_venta == D(0) and f.precio_mayoreo == D(0)
+    assert sum("valor no válido" in a for a in f.advertencias) == 3
+
+
+def test_inventario_vacio_negativo_o_fuera_de_rango_siguen_siendo_advertencia():
+    a = imp.analizar_contenido(_archivo("A1\tX\t1\t1\t1\t\t0\tD", "A2\tY\t1\t1\t1\t-4\t0\tD",
+                                        "A3\tZ\t1\t1\t1\t99999999999999\t0\tD"), "F.xls")
+    assert all(f.valida and f.inventario is None and any("sin stock" in x for x in f.advertencias) for f in a)

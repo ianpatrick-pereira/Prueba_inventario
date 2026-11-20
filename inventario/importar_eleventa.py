@@ -7,6 +7,7 @@ Solo se LEE el archivo exportado; no se toca Eleventa.
 El mapeo de columnas esta en COLUMNAS: es el unico lugar a ajustar cuando llegue el archivo real.
 """
 import csv
+from collections import Counter
 import hashlib
 import io
 import re
@@ -433,12 +434,15 @@ def _codigo(celda, advertencias, errores):
     return t
 
 
-def _monto(celda, modo, adv, errores, etiqueta, maximo=MAX_MONTO):
+def _monto(celda, modo, adv, errores, etiqueta, maximo=MAX_MONTO, texto_es_error=False):
     if celda is None or (isinstance(celda, str) and not celda.strip()):
         return Decimal("0")
     d = parsear_decimal(celda, modo)
     if d is AMBIGUO:
         errores.append(f"{etiqueta}: valor ambiguo («{str(celda)[:30]}»): no se sabe si el punto o la coma es decimal.")
+        return Decimal("0")
+    if d is None and texto_es_error:       # afecta el stock: un texto que no es numero es error de fila
+        errores.append(f"{etiqueta}: texto no numérico («{str(celda)[:30]}»): no se importa la fila.")
         return Decimal("0")
     if d is None or d < 0 or d > maximo:
         adv.append(f"{etiqueta}: valor no válido («{str(celda)[:30]}»), queda en 0.")
@@ -491,6 +495,10 @@ def analizar_contenido(contenido, nombre):
         entre_comillas = sum(len(c) >= 2 and c.startswith('"') and c.endswith('"') for c in llenas)
         if llenas and entre_comillas * 2 > len(llenas):
             resultado.avisos.append(AVISO_EXCEL)
+    moda = None
+    if es_texto and utiles:    # la cantidad de celdas crudas (con vacias) mas frecuente: lo normal de este archivo
+        cuentas = Counter(len(celdas) for _, celdas in utiles)
+        moda = max(cuentas, key=lambda n: (cuentas[n], -n))      # empate: la menor (lo dudoso se marca)
     modos = {
         c: detectar_modo(_valor(celdas, mapa, c) for _, celdas in utiles) for c in COLUMNAS_NUMERICAS
     }
@@ -503,11 +511,15 @@ def analizar_contenido(contenido, nombre):
         f.costo = _monto(_valor(celdas, mapa, "costo"), modos["costo"], adv, err, "Precio costo")
         f.precio_venta = _monto(_valor(celdas, mapa, "precio_venta"), modos["precio_venta"], adv, err, "Precio venta")
         f.precio_mayoreo = _monto(_valor(celdas, mapa, "precio_mayoreo"), modos["precio_mayoreo"], adv, err, "Precio mayoreo")
-        f.minimo = _monto(_valor(celdas, mapa, "minimo"), modos["minimo"], adv, err, "Inv. mínimo", MAX_CANTIDAD)
+        f.minimo = _monto(_valor(celdas, mapa, "minimo"), modos["minimo"], adv, err, "Inv. mínimo", MAX_CANTIDAD,
+                        texto_es_error=True)
         inv_crudo = _valor(celdas, mapa, "inventario")
         inv = parsear_decimal(inv_crudo, modos["inventario"])
         if inv is AMBIGUO:
             err.append(f"Inventario: valor ambiguo («{str(inv_crudo)[:30]}»): no se sabe si el punto o la coma es decimal.")
+            f.inventario = None
+        elif inv is None and inv_crudo is not None and str(inv_crudo).strip() != "":
+            err.append(f"Inventario: texto no numérico («{str(inv_crudo)[:30]}»): no se importa la fila.")
             f.inventario = None
         elif inv is None or inv < 0 or inv > MAX_CANTIDAD:
             adv.append(f"Inventario no válido o negativo («{str(inv_crudo)[:30]}»): se importa sin stock.")
@@ -518,8 +530,14 @@ def analizar_contenido(contenido, nombre):
                 adv.append(f"Inventario redondeado a 2 decimales ({inv_crudo}).")
         if es_texto:
             n = len(_recortar(celdas))
+            crudas = len(celdas)
             if n > meta["ancho"]:   # nunca se corren valores: una celda de mas desplazaria precios e inventario
                 err.append(f"La fila tiene {n} columnas y el encabezado {meta['ancho']}: "
+                           "revisa la descripción en Eleventa.")
+            elif crudas > moda and crudas > meta["ancho"]:
+                # tambien con celdas vacias de mas (Departamento suele venir vacio): un TAB dentro de la
+                # descripcion corre todo a la derecha. Si TODO el archivo trae una columna de mas, es normal.
+                err.append(f"La fila tiene {crudas} columnas y el resto del archivo {moda}: "
                            "revisa la descripción en Eleventa.")
             if meta["codificacion"] == "Windows-1252" and any(
                     _MOJIBAKE.search(x) for x in (f.codigo, f.descripcion, f.departamento)):
