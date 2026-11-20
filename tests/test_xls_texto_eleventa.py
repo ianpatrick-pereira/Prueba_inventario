@@ -631,7 +631,7 @@ def test_espacio_mal_puesto_es_error_de_fila_en_texto():
 # ------------------------------------------------------------------ R4: mala lectura nunca actualiza existentes
 def _archivo_mixto(sku_mojibake):
     cab = ENCABEZADO_REAL.encode("cp1252") + b"\n"
-    cp1252 = f"B2\tAceite ñandú\t100\t200\t150\t5\t1\tD\n".encode("cp1252")          # fuerza Windows-1252
+    cp1252 = "B2\tAceite ñandú\t100\t200\t150\t5\t1\tD\n".encode("cp1252")          # fuerza Windows-1252
     mojibake = f"{sku_mojibake}\tBujía nueva\t999\t1999\t1500\t8\t3\tD\n".encode("utf-8")  # UTF-8 mezclado
     return cab + cp1252 + mojibake
 
