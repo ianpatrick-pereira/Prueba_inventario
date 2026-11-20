@@ -116,7 +116,7 @@ def test_lee_xlsx_y_csv_con_titulos_y_totales(contenido, nombre):
     filas = imp.analizar_contenido(contenido, nombre)
     assert [f.codigo for f in filas] == ["0077", "A100", "B200"]      # sin fila de titulo, vacia ni totales
     assert filas[0].descripcion == "Filtro de aceite" and filas[2].descripcion == "Bujía"
-    assert filas[0].costo == D("1234") and filas[1].costo == D("1234.50")
+    assert filas[0].costo == D("1234") and filas[1].costo == D("1235")
     assert filas[0].inventario == D("10") and filas[1].inventario == D("5") and filas[2].inventario == D("0")
     assert filas[0].minimo == D("2") and filas[0].departamento == "Filtros"
     assert filas[0].numero > 3  # numero de fila real del archivo
@@ -409,8 +409,8 @@ def test_existente_no_cambia_stock_y_se_informa_la_diferencia(adm, admin_user):
     assert servicios.stock_de(p) == D("4.00")                    # NO se toco
     assert p.nombre == "Nombre viejo" and p.costo == D("1")      # sin la opcion, tampoco los datos
     dif = ImportacionEleventa.objects.get().resumen["diferencias"]
-    assert dif == [{"codigo": "0077", "archivo": "10.00", "sistema": "4.00", "diferencia": "6.00"}]
-    assert "6,00" in adm.get(reverse("importar_resumen", args=[i.pk])).content.decode()
+    assert dif == [{"codigo": "0077", "archivo": "10", "sistema": "4.00", "diferencia": "6.00"}]
+    assert '<td class="num">6</td>' in adm.get(reverse("importar_resumen", args=[i.pk])).content.decode()
 
 
 def test_con_la_opcion_actualiza_datos_de_existentes_pero_no_el_stock(adm, admin_user):
@@ -704,58 +704,98 @@ def test_requirements_fija_openpyxl_y_et_xmlfile():
     assert "openpyxl==3.1.5" in t and re.search(r"^et_xmlfile==\d", t, re.M)
 
 
-# ------------------------------------------------------------------ D-50: separador decimal por columna
-def _costos(valores):
-    filas = [[f"C{i}", f"Cosa {i}", v, 1, 1, 1, 0, ""] for i, v in enumerate(valores)]
-    return imp.analizar_contenido(csv_bytes(filas), "x.csv")
+# ------------------------------------------------------------------ D-61: pesos chilenos y stock entero (reemplaza a D-50 en este importador)
+def _fila_num(**kw):
+    c = dict(costo="1", venta="1", mayoreo="1", inv="5", minimo="0")
+    c.update(kw)
+    return ["N1", "x", c["costo"], c["venta"], c["mayoreo"], c["inv"], c["minimo"], ""]
 
 
-def test_columna_con_evidencia_de_coma_decimal_lee_el_punto_como_miles():
-    filas = _costos(["1.500", "2,5", "1.234,50"])
-    assert [f.costo for f in filas] == [D("1500"), D("2.5"), D("1234.5")] and all(f.valida for f in filas)
+def _analizar(fila, nombre="x.csv"):
+    return imp.analizar_contenido(csv_bytes([fila]), nombre)[0]
 
 
-def test_columna_con_evidencia_de_punto_decimal_lee_el_punto_como_decimal():
-    filas = _costos(["1.005", "2.75", "0.500"])
-    assert [f.costo for f in filas] == [D("1.01"), D("2.75"), D("0.50")] and all(f.valida for f in filas)
-    assert any("redondeado" in a for a in filas[0].advertencias)
+@pytest.mark.parametrize("texto_monto,esperado,redondeado", [
+    ("15990", 15990, False), ("15.990", 15990, False), ("$15.990", 15990, False), ("15,990", 15990, False),
+    ("1.234.567", 1234567, False), ("15990.00", 15990, False), ("15990,00", 15990, False), ("15.990,00", 15990, False),
+    ("15,990.00", 15990, False), ("1.234,50", 1235, True), ("1234.5", 1235, True), ("1.000", 1000, False),
+    ("999", 999, False), ("0", 0, False), ("$ 15.990", 15990, False), ("1 500", 1500, False),
+    ("1.234,49", 1234, True), ("0,5", 1, True), ("0,4", 0, True),
+])
+def test_montos_en_pesos_chilenos(texto_monto, esperado, redondeado):
+    valor, fue_redondeado = imp.leer_monto_clp(texto_monto)
+    assert valor == D(esperado) and fue_redondeado is redondeado and isinstance(valor, Decimal)
+    assert valor == valor.to_integral_value()
 
 
-def test_valor_ambiguo_sin_evidencia_es_error_de_fila_en_esa_columna():
-    f1, f2 = _costos(["1.500", "2000"])
-    assert not f1.valida and "ambiguo" in f1.errores[0] and "Precio costo" in f1.errores[0]
-    assert f2.valida and f2.costo == D("2000")
+@pytest.mark.parametrize("texto_cant,esperado,decimales", [
+    ("5", 5, False), ("5.00", 5, False), ("5,00", 5, False), ("1.000", 1000, False), ("1,000", 1000, False),
+    ("3,5", D("3.50"), True), ("3.5", D("3.50"), True), ("0,500", D("0.50"), True), ("12,345", 12345, False),
+    ("2,25", D("2.25"), True), ("2.256", 2256, False), ("0", 0, False),
+])
+def test_cantidades_de_stock(texto_cant, esperado, decimales):
+    valor, con_decimales = imp.leer_cantidad(texto_cant)
+    assert valor == D(esperado) and con_decimales is decimales
+    assert (valor == valor.to_integral_value()) is (not decimales)
 
 
-def test_cero_punto_quinientos_nunca_es_miles():
-    assert _costos(["0.500"])[0].costo == D("0.50")
+@pytest.mark.parametrize("malo", ["abc", "15.", "1..2", "12.34.56", "1234.567", "1 5", "15 00", "", None, True, "١٢٣", "1e3", "$"])
+def test_lo_que_no_es_numero_da_none_sin_error_de_ambiguedad(malo):
+    assert imp.leer_monto_clp(malo)[0] is None and imp.leer_cantidad(malo)[0] is None
 
 
-def test_coma_de_miles_solo_si_la_columna_lo_indica():
-    asi = _costos(["1,234,567", "2.75"])
-    assert asi[0].costo == D("1234567") and asi[0].valida
-    sin = _costos(["1,234,567", "10"])[0]
-    assert not sin.valida and "ambiguo" in sin.errores[0]
-    conmilcoma = _costos(["1,234", "2.75"])[0]
-    assert conmilcoma.costo == D("1234")
-    con_coma_decimal = _costos(["1,234", "2,5"])[0]
-    assert con_coma_decimal.costo == D("1.23") and any("redondeado" in a for a in con_coma_decimal.advertencias)
+def test_numeros_nativos_de_xlsx_en_montos_y_stock():
+    assert imp.leer_monto_clp(15990.0) == (D("15990"), False) and imp.leer_monto_clp(15990) == (D("15990"), False)
+    assert imp.leer_monto_clp(1234.5) == (D("1235"), True) and imp.leer_cantidad(5.0) == (D("5"), False)
+    assert imp.leer_cantidad(3.5) == (D("3.50"), True)
+    wb = Workbook()
+    ws = wb.active
+    ws.append(ENCABEZADOS)
+    ws.append(["X1", "Nativo", 15990.0, 19990, 1234.5, 5.0, 2, "D"])
+    b = io.BytesIO()
+    wb.save(b)
+    f = imp.analizar_contenido(b.getvalue(), "n.xlsx")[0]
+    assert (f.costo, f.precio_venta, f.precio_mayoreo, f.inventario, f.minimo) == (D(15990), D(19990), D(1235), D(5), D(2))
+    assert any("se redondeó al peso" in a for a in f.advertencias) and f.valida
 
 
-def test_inventario_ambiguo_es_error_y_numeros_nativos_de_xlsx_no_cambian():
-    f = imp.analizar_contenido(csv_bytes([["I1", "x", 1, 1, 1, "1.500", 0, ""]]), "x.csv")[0]
-    assert not f.valida and "Inventario: valor ambiguo" in f.errores[0]
-    nativos = imp.analizar_contenido(xlsx([["I2", "x", 1500, 1, 1, 1500, 0, ""], ["I3", "y", 1.5, 1, 1, 0.5, 0, ""]]), "x.xlsx")
-    assert [f.valida for f in nativos] == [True, True]
-    assert nativos[0].costo == D("1500") and nativos[1].costo == D("1.5") and nativos[1].inventario == D("0.5")
+def test_nunca_hay_error_de_ambiguedad_en_montos_ni_en_stock():
+    for v in ("1.500", "1,500", "15.990", "1.000", "2,5", "0.500"):
+        f = _analizar(_fila_num(costo=v, venta=v, mayoreo=v, inv=v, minimo=v))
+        assert f.valida and not any("ambiguo" in e for e in f.errores), v
 
 
-def test_vista_previa_muestra_el_error_de_ambiguedad_y_no_importa_la_fila(adm):
-    i = preparar(adm, xlsx([["OK", "Bien", "2,5", 1, 1, 1, 0, ""], ["AMB", "Ambigua", 1, 1, 1, "1.500", 0, ""]]))
+def test_cada_columna_usa_la_regla_clp_en_la_fila_completa():
+    f = _analizar(_fila_num(costo="$15.990", venta="19.990,00", mayoreo="1.234,50", inv="1.000", minimo="3,5"))
+    assert (f.costo, f.precio_venta, f.precio_mayoreo, f.inventario) == (D(15990), D(19990), D(1235), D(1000))
+    assert f.minimo == D("3.50") and f.valida
+    assert any("Precio mayoreo: se redondeó al peso" in a for a in f.advertencias)
+    assert any("Inv. mínimo: stock con decimales (producto a granel?)." in a for a in f.advertencias)
+
+
+def test_stock_con_decimales_no_se_redondea_y_avisa():
+    f = _analizar(_fila_num(inv="3,5"))
+    assert f.inventario == D("3.50") and f.valida and "Inventario: stock con decimales (producto a granel?)." in f.advertencias
+    sin = _analizar(_fila_num(inv="5.00"))
+    assert sin.inventario == D(5) and not any("decimales" in a for a in sin.advertencias)
+
+
+def test_centavos_se_redondean_al_peso_con_advertencia():
+    f = _analizar(_fila_num(costo="1.234,50", venta="1234.5", mayoreo="1.234,00"))
+    assert (f.costo, f.precio_venta, f.precio_mayoreo) == (D(1235), D(1235), D(1234))
+    assert sum("se redondeó al peso" in a for a in f.advertencias) == 2          # el de ,00 no avisa
+
+
+def test_texto_no_numerico_sigue_siendo_error_en_texto_y_las_columnas_corridas_tambien():
+    assert not _analizar(_fila_num(costo="gratis")).valida
+    assert not _analizar(_fila_num(inv="muchos")).valida and not _analizar(_fila_num(minimo="poco")).valida
+    assert _analizar(_fila_num(costo="")).valida                                   # vacio: advertencia y 0
+
+
+def test_vista_previa_muestra_montos_en_pesos_y_stock_entero(adm):
+    i = preparar(adm, xlsx([["P1", "Con precios", "15.990", "19.990", "1.234,50", "5.00", "2", "Dep"]]))
     t = adm.get(reverse("importar_vista_previa", args=[i.pk])).content.decode()
-    assert "valor ambiguo" in t
-    confirmar_http(adm, i)
-    assert list(Producto.objects.values_list("sku", flat=True)) == ["OK"]
+    assert "$15.990" in t and '<td class="num">5</td>' in t and "5,00" not in t
 
 
 # ------------------------------------------------------------------ A3: filas de totales
