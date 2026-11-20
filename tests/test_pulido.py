@@ -539,3 +539,54 @@ def test_atajo_ctrl_k_y_cmd_k_enfocan_el_buscador_y_la_pista_lo_dice(adm):
         t = html(adm.get(reverse(nombre)))
         assert "Presiona <kbd>/</kbd> o <kbd>Ctrl</kbd>+<kbd>K</kbd> para buscar" in t, nombre
         assert "Presiona <kbd>/</kbd> para buscar" not in t
+
+
+# ------------------------------------------------------------------ celda de stock en una sola linea (T-F1-20)
+def _celda_stock(t, sku):
+    fila = next(f for f in t.split("<tr") if f">{sku}<" in f)
+    return re.search(r'<td class="num stock">(.*?)</td>', fila, re.S).group(1)
+
+
+def test_la_celda_de_stock_tiene_barra_numero_e_insignia_en_ese_orden_en_un_contenedor_en_linea(adm, admin_user):
+    bajo = prod("BJ", stock_min=D("6"), stock_max=D("15"))
+    sobre = prod("OK", stock_min=D("2"), stock_max=D("15"))
+    sin_barra = prod("SB", stock_min=D("0"), stock_max=D("0"))
+    servicios.registrar_entrada(bajo, 3, admin_user)
+    servicios.registrar_entrada(sobre, 9, admin_user)
+    servicios.registrar_entrada(sin_barra, 4, admin_user)
+    t = html(adm.get(reverse("producto_lista")))
+    c = _celda_stock(t, "BJ")
+    assert c.startswith('<span class="stock-celda">') and c.endswith("</span>")
+    assert c.index('class="barra-stock rojo"') < c.index('<span class="stock-valor">3</span>') < c.index("insignia insignia-bajo")
+    assert 'aria-label="3 de 15, mínimo 6"' in c and 'title="3 de 15, mínimo 6"' in c and 'role="img"' in c
+    c = _celda_stock(t, "OK")                                    # sobre el minimo: barra y numero, sin insignia
+    assert c.index('class="barra-stock verde"') < c.index('<span class="stock-valor">9</span>') and "insignia" not in c
+    c = _celda_stock(t, "SB")                                    # sin maximo: solo numero (sigue en su columna)
+    assert "barra-stock" not in c and '<span class="stock-valor">4</span>' in c
+
+
+def test_css_de_la_celda_de_stock_una_linea_columnas_fijas_y_alineada(adm):
+    css = CSS
+    regla = re.search(r"\.stock-celda\s*\{([^}]*)\}", css).group(1)
+    assert "inline-grid" in regla and "align-items: center" in regla and "96px" in regla and "justify-content: end" in regla
+    assert re.search(r"\.stock-celda \.barra-stock\s*\{[^}]*width:\s*96px", css)
+    assert re.search(r"\.stock-celda \.stock-valor\s*\{[^}]*grid-column:\s*2[^}]*text-align:\s*right[^}]*tabular-nums", css)
+    assert re.search(r"\.stock-celda \.insignia\s*\{[^}]*grid-column:\s*3", css)
+    assert re.search(r"td\s*\{[^}]*vertical-align:\s*middle", css)         # todas las celdas centradas
+    movil = css.split("@media (max-width: 640px)", 1)[1]
+    assert ".stock-celda { grid-template-columns: 72px" in movil and "grid-column: 1 / -1" in movil   # la insignia pasa debajo
+
+
+def test_la_barra_de_la_ficha_conserva_su_estilo_grande(adm, admin_user):
+    p = prod("FG", stock_min=D("6"), stock_max=D("15"))
+    servicios.registrar_entrada(p, 9, admin_user)
+    t = html(adm.get(reverse("producto_detalle", args=[p.pk])))
+    assert '<div class="barra-grande">' in t and "stock-celda" not in t
+    assert re.search(r"\.barra-grande \.barra-stock[^{]*\{[^}]*height:\s*10px[^}]*max-width:\s*none", CSS)
+
+
+def test_el_titulo_de_stock_queda_sobre_los_numeros(adm):
+    prod("TT")
+    t = html(adm.get(reverse("producto_lista")))
+    assert '<th class="num stock">Stock</th>' in t
+    assert re.search(r"th\.stock\s*\{[^}]*padding-right:\s*calc\(16px \+ 104px", CSS)

@@ -217,6 +217,13 @@ input[type=checkbox] { width: 20px; height: 20px; vertical-align: middle; margin
 .barra-stock.ambar .relleno { background: var(--barra-ambar); }
 .barra-stock.rojo .relleno { background: var(--barra-rojo); }
 .barra-stock .marca-minimo { position: absolute; top: -3px; width: 2px; height: 12px; background: var(--fg); transform: translateX(-1px); }
+/* celda de stock de la lista: UNA linea centrada (barra | numero | insignia) en columnas fijas, para que
+   los numeros queden alineados entre filas y con «Minimo» y «Precio venta» */
+.stock-celda { display: inline-grid; grid-template-columns: 96px 4.5em 104px; column-gap: var(--s1); align-items: center; justify-content: end; }
+th.stock { padding-right: calc(16px + 104px + var(--s1)); }          /* el titulo queda sobre los numeros, no sobre la insignia */
+.stock-celda .barra-stock { grid-column: 1; width: 96px; min-width: 96px; max-width: 96px; margin: 0; }
+.stock-celda .stock-valor { grid-column: 2; text-align: right; font-variant-numeric: tabular-nums; }
+.stock-celda .insignia { grid-column: 3; justify-self: start; margin: 0; }
 .barra-grande .barra-stock, .tarjeta > .barra-stock { height: 10px; max-width: none; margin-left: 0; margin-top: var(--s1); }
 .barra-grande .marca-minimo, .tarjeta > .barra-stock .marca-minimo { top: -4px; height: 18px; }
 
@@ -284,6 +291,10 @@ body:not(.con-lateral) .marca-ingreso { color: var(--lateral); font-family: var(
   .dato { flex-direction: column; gap: 0; }
   .dato dd, .dato .v { text-align: left; }
   .cifra { font-size: 28px; }
+  th.stock { padding-right: 16px; }
+  .stock-celda { grid-template-columns: 72px 3.5em; }          /* si no cabe, la insignia pasa debajo del numero */
+  .stock-celda .barra-stock { width: 72px; min-width: 72px; max-width: 72px; }
+  .stock-celda .insignia { grid-column: 1 / -1; justify-self: end; margin-top: 4px; }
 }
 
 /* ---------- impresion: hoja limpia, sin barra lateral ni botones ---------- */
