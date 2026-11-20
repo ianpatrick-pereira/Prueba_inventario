@@ -657,7 +657,7 @@ class ImportarVistaPrevia(_ImportarBase, View):
         pagina = _Paginator(filas, 100).get_page(request.GET.get("page"))
         return render(request, self.template_name, {
             "imp": imp, "resumen": importar_eleventa.resumir(filas), "pagina": pagina,
-            "omitidas": filas.omitidas,
+            "omitidas": filas.omitidas, "codificacion": filas.codificacion, "avisos": filas.avisos,
             "token": tokens.emitir(request, f"importar:{pk}"),
         })
 

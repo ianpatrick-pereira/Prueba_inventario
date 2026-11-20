@@ -94,7 +94,17 @@ MSG_OLE = ("Este archivo es Excel 97-2003, que el sistema no lee. "
            "Expórtalo de nuevo desde Eleventa o guárdalo como .xlsx")
 MSG_BINARIO = ("El archivo no parece ser de texto (contiene datos binarios). "
                "Expórtalo de nuevo desde Eleventa o guárdalo como .xlsx o .csv.")
+MSG_UTF16 = ("El archivo está en formato Unicode (UTF-16). "
+             "Expórtalo de nuevo desde Eleventa sin abrirlo en Excel.")
+MSG_CODIFICACION = ("Codificación no reconocida: el archivo no está en UTF-8 ni en Windows-1252. "
+                    "Expórtalo de nuevo desde Eleventa sin abrirlo en Excel.")
+AVISO_EXCEL = ("Parece que este archivo fue abierto y guardado en Excel. Para evitar errores, "
+               "expórtalo de nuevo desde Eleventa y súbelo sin abrirlo.")
 _FIRMA_OLE = b"\xd0\xcf\x11\xe0"
+_BOM_UTF16 = (b"\xff\xfe", b"\xfe\xff")
+_RELLENO_FINAL = b"\x00\x1a"                       # NUL y Ctrl-Z (0x1A) al final del archivo se ignoran
+_C1 = re.compile("[\u0080-\u009f]")                # controles C1: senal de mala codificacion
+_MOJIBAKE = re.compile("[\u00c3\u00c2][\u0080-\u00bf]")   # «Ã©», «Â°»: UTF-8 leido como Windows-1252
 _CONTROL = bytes(set(range(32)) - {9, 10, 13})      # control que no es TAB, LF ni CR
 
 
@@ -109,26 +119,38 @@ def detectar_formato(contenido):
         return "xlsx"
     if contenido[:4] == _FIRMA_OLE:
         raise ArchivoInvalido(MSG_OLE)
-    if contenido.translate(None, _CONTROL) != contenido:
+    if contenido[:2] in _BOM_UTF16:
+        raise ArchivoInvalido(MSG_UTF16)
+    cuerpo = contenido.rstrip(_RELLENO_FINAL)
+    if cuerpo.translate(None, _CONTROL) != cuerpo:
         raise ArchivoInvalido(MSG_BINARIO)
     return "texto"
 
 
-def decodificar_texto(contenido):
-    """UTF-8 (con o sin BOM); si falla, Windows-1252 (comillas curvas, «€»…); como ultimo
-    recurso Latin-1, que acepta cualquier byte."""
-    for codec in ("utf-8-sig", "cp1252"):
+def decodificar_con_codificacion(contenido):
+    """Devuelve (texto, "UTF-8" | "Windows-1252"). UTF-8 (con o sin BOM) y, si falla, Windows-1252
+    (comillas curvas, «€»…). Si hay bytes sin definir en Windows-1252 o el texto trae controles C1
+    (U+0080 a U+009F) la codificacion no se reconoce y el archivo se rechaza (no se adivina)."""
+    contenido = contenido.rstrip(_RELLENO_FINAL)
+    try:
+        texto, nombre = contenido.decode("utf-8-sig"), "UTF-8"
+    except UnicodeDecodeError:
         try:
-            return contenido.decode(codec)
+            texto, nombre = contenido.decode("cp1252"), "Windows-1252"
         except UnicodeDecodeError:
-            continue
-    return contenido.decode("latin-1")
+            raise ArchivoInvalido(MSG_CODIFICACION)
+    if _C1.search(texto):
+        raise ArchivoInvalido(MSG_CODIFICACION)
+    return texto, nombre
 
 
-def _filas_texto(contenido):
+def decodificar_texto(contenido):
+    return decodificar_con_codificacion(contenido)[0]
+
+
+def _filas_texto(texto):
     """Un solo camino para texto delimitado (.csv, .xls de Eleventa...): prueba TAB, «;» y «,»
     y entrega las filas de cada uno; leer_tabla se queda con el que trae los encabezados."""
-    texto = decodificar_texto(contenido)
     for delim in ("\t", ";", ","):
         # Con TAB las comillas son texto literal (QUOTE_NONE): en un lubricentro las descripciones traen
         # pulgadas («MANGUERA 1/2"») y una comilla suelta juntaria filas; en la exportacion de Eleventa el
@@ -155,11 +177,26 @@ def _ubicar_encabezados(filas):
     return None
 
 
-def leer_tabla(contenido, nombre):
-    """Devuelve (mapa, filas): `filas` = [(numero_de_fila_en_el_archivo, [celdas])]."""
+def _recortar(celdas):
+    """Celdas sin las vacias del final (una columna extra vacia al final no cuenta)."""
+    celdas = list(celdas)
+    while celdas and (celdas[-1] is None or str(celdas[-1]).strip() == ""):
+        celdas.pop()
+    return celdas
+
+
+def leer_tabla_meta(contenido, nombre):
+    """Devuelve (mapa, filas, meta). `filas` = [(numero_de_fila_en_el_archivo, [celdas])] y
+    `meta` = {"formato": "xlsx"|"texto", "codificacion": "UTF-8"|"Windows-1252"|None, "ancho": columnas del encabezado}."""
     if len(contenido) > MAX_BYTES:
         raise ArchivoInvalido("El archivo supera el máximo de 5 MB.")
-    candidatas = _filas_xlsx(contenido) if detectar_formato(contenido) == "xlsx" else _filas_texto(contenido)
+    formato = detectar_formato(contenido)
+    codificacion = None
+    if formato == "xlsx":
+        candidatas = _filas_xlsx(contenido)
+    else:
+        texto, codificacion = decodificar_con_codificacion(contenido)
+        candidatas = _filas_texto(texto)
     for filas in candidatas:
         ubicado = _ubicar_encabezados(filas)
         if ubicado:
@@ -167,12 +204,18 @@ def leer_tabla(contenido, nombre):
             datos = [(n, f) for n, f in enumerate(filas[i + 1:], start=i + 2)]
             if len(datos) > MAX_FILAS:
                 raise ArchivoInvalido(f"El archivo tiene demasiadas filas (máximo {MAX_FILAS}).")
-            return mapa, datos
+            return mapa, datos, {"formato": formato, "codificacion": codificacion, "ancho": len(_recortar(filas[i]))}
     faltan = ", ".join(NOMBRES_VISIBLES[o] for o in OBLIGATORIAS)
     raise ArchivoInvalido(
         f"No se encontraron los encabezados obligatorios ({faltan}) en el archivo. "
         "Revisa que sea la exportación del reporte de inventario de Eleventa."
     )
+
+
+def leer_tabla(contenido, nombre):
+    """Devuelve (mapa, filas): `filas` = [(numero_de_fila_en_el_archivo, [celdas])]."""
+    mapa, datos, _ = leer_tabla_meta(contenido, nombre)
+    return mapa, datos
 
 
 # ----------------------------------------------------------------------------- numeros (D-50)
@@ -339,14 +382,18 @@ class Analisis(list):
         super().__init__(*a)
         self.omitidas = []   # [{"fila": n, "texto": "..."}]
         self.vacias = 0
+        self.codificacion = None   # "UTF-8" | "Windows-1252" (solo texto)
+        self.avisos = []           # avisos generales del archivo (vista previa)
 
     def a_json(self):
-        return {"filas": [f.a_dict() for f in self], "omitidas": self.omitidas, "vacias": self.vacias}
+        return {"filas": [f.a_dict() for f in self], "omitidas": self.omitidas, "vacias": self.vacias,
+                "codificacion": self.codificacion, "avisos": self.avisos}
 
     @classmethod
     def de_json(cls, datos):
         a = cls(Fila.de_dict(d) for d in datos["filas"])
         a.omitidas, a.vacias = list(datos["omitidas"]), datos["vacias"]
+        a.codificacion, a.avisos = datos.get("codificacion"), list(datos.get("avisos", []))
         return a
 
 
@@ -379,7 +426,9 @@ def _codigo(celda, advertencias, errores):
         )
         return normalizar_codigo(texto)
     t = normalizar_codigo(str(celda))
-    if t.startswith(PELIGROSOS):
+    if t.startswith('"') or t.endswith('"'):
+        errores.append("Código entre comillas: el archivo pasó por Excel; expórtalo de nuevo desde Eleventa.")
+    elif t.startswith(PELIGROSOS):
         errores.append("Código con símbolo inicial / no válido: revisar en Eleventa.")
     return t
 
@@ -424,8 +473,10 @@ COLUMNAS_NUMERICAS = ("costo", "precio_venta", "precio_mayoreo", "inventario", "
 
 def analizar_contenido(contenido, nombre):
     """Lee el archivo y devuelve un Analisis (lista de Fila; no consulta la base)."""
-    mapa, datos = leer_tabla(contenido, nombre)
+    mapa, datos, meta = leer_tabla_meta(contenido, nombre)
+    es_texto = meta["formato"] == "texto"
     resultado = Analisis()
+    resultado.codificacion = meta["codificacion"]
     utiles = []
     for numero, celdas in datos:
         if _es_vacia(celdas):
@@ -435,6 +486,11 @@ def analizar_contenido(contenido, nombre):
                 str(c).strip()[:60] for c in celdas if c is not None and str(c).strip())})
         else:
             utiles.append((numero, celdas))
+    if es_texto:      # mas de la mitad de las celdas entre comillas: el archivo paso por Excel
+        llenas = [str(c).strip() for _, celdas in utiles for c in celdas if c is not None and str(c).strip()]
+        entre_comillas = sum(len(c) >= 2 and c.startswith('"') and c.endswith('"') for c in llenas)
+        if llenas and entre_comillas * 2 > len(llenas):
+            resultado.avisos.append(AVISO_EXCEL)
     modos = {
         c: detectar_modo(_valor(celdas, mapa, c) for _, celdas in utiles) for c in COLUMNAS_NUMERICAS
     }
@@ -460,6 +516,14 @@ def analizar_contenido(contenido, nombre):
             f.inventario = _redondear(inv)
             if f.inventario != inv:
                 adv.append(f"Inventario redondeado a 2 decimales ({inv_crudo}).")
+        if es_texto:
+            n = len(_recortar(celdas))
+            if n > meta["ancho"]:   # nunca se corren valores: una celda de mas desplazaria precios e inventario
+                err.append(f"La fila tiene {n} columnas y el encabezado {meta['ancho']}: "
+                           "revisa la descripción en Eleventa.")
+            if meta["codificacion"] == "Windows-1252" and any(
+                    _MOJIBAKE.search(x) for x in (f.codigo, f.descripcion, f.departamento)):
+                adv.append("Texto con posible mala decodificación (mezcla de codificaciones): revisa los acentos.")
         if not f.codigo:
             err.append("Código vacío.")
         elif len(f.codigo) > 50:
