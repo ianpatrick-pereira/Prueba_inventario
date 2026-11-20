@@ -36,14 +36,14 @@
   {% if productos %}
   <div class="tabla-scroll alta">
   <table>
-    <thead><tr><th>Código</th><th>Nombre</th><th class="no-imprimir">Categoría</th><th class="num">Stock</th><th class="num">Mínimo</th><th class="num solo-impresion">Máximo</th><th class="num solo-impresion">Sugerido</th><th class="num no-imprimir">Precio venta</th></tr></thead>
+    <thead><tr><th>Código</th><th>Nombre</th><th class="no-imprimir">Categoría</th><th class="num stock">Stock</th><th class="num">Mínimo</th><th class="num solo-impresion">Máximo</th><th class="num solo-impresion">Sugerido</th><th class="num no-imprimir">Precio venta</th></tr></thead>
     <tbody>
     {% for p in productos %}
       <tr{% if p.stock_min > 0 and p.stock <= p.stock_min %} class="bajo"{% endif %}>
         <td class="mono"><a href="{% url 'producto_detalle' p.pk %}{% if volver_param %}?{{ volver_param }}{% endif %}">{{ p.sku }}</a></td>
         <td>{{ p.nombre }}</td>
         <td class="no-imprimir">{{ p.categoria.nombre|default:"-" }}</td>
-        <td class="num stock">{{ p.stock|cantidad }}{% if p.stock_min > 0 and p.stock <= p.stock_min %} <span class="insignia insignia-bajo">bajo mínimo</span>{% endif %}{% barra_stock p.stock p.stock_min p.stock_max %}</td>
+        <td class="num stock"><span class="stock-celda">{% barra_stock p.stock p.stock_min p.stock_max %}<span class="stock-valor">{{ p.stock|cantidad }}</span>{% if p.stock_min > 0 and p.stock <= p.stock_min %}<span class="insignia insignia-bajo">bajo mínimo</span>{% endif %}</span></td>
         <td class="num">{{ p.stock_min|cantidad }}</td>
         <td class="num solo-impresion">{{ p.stock_max|cantidad }}</td>
         <td class="num solo-impresion">{{ p|sugerida }}</td>

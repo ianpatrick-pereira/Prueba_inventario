@@ -106,7 +106,7 @@ def test_producto_con_varios_codigos_sale_una_vez_con_su_stock_real(adm, catalog
     filas = list(r.context["productos"])
     assert [p.sku for p in filas].count("C934J") == 1  # coincide por 2 codigos alt. y 1 de proveedor
     assert {p.sku: p.stock for p in filas}["C934J"] == D("7.00")
-    assert 'class="num stock">7</td>' in html(r)      # la lista muestra el stock entero sin decimales
+    assert '<span class="stock-valor">7</span>' in html(r)      # la lista muestra el stock entero sin decimales
 
 
 def test_busqueda_sin_resultados_mensaje(adm, catalogo):
@@ -156,7 +156,7 @@ def test_stock_con_dos_decimales_y_marca_bajo_el_minimo(adm, admin_user, prod):
     filas = {p.sku: p for p in r.context["productos"]}
     assert filas["C934J"].stock == D("2.50") and filas["OK1"].stock == D("1.25")
     texto = html(r)
-    assert "2,50" in texto and "1,25" in texto and 'class="num stock">0</td>' in texto   # enteros sin decimales, fracciones con 2
+    assert "2,50" in texto and "1,25" in texto and '<span class="stock-valor">0</span>' in texto   # enteros sin decimales, fracciones con 2
     marcadas = [l for l in texto.splitlines() if 'class="bajo"' in l]
     assert len(marcadas) == 1 and "bajo mínimo" in texto
     assert "OK1" in texto.split('class="bajo"')[1][:300]
