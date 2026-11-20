@@ -619,7 +619,9 @@ class ImportarSubir(_ImportarBase, View):
         nombre = (request.FILES["archivo"].name or "archivo").replace("\\", "/").rsplit("/", 1)[-1][:255]
         imp = ImportacionEleventa(usuario=request.user, hash_sha256=huella, nombre_original=nombre,
                                   analisis=form.analisis.a_json())
-        imp.archivo.save(nombre, ContentFile(contenido), save=False)
+        # Se guarda con nombre aleatorio y la extension del FORMATO detectado (no la del nombre original).
+        imp.archivo.save("importacion.csv" if form.formato == "texto" else "importacion.xlsx",
+                         ContentFile(contenido), save=False)
         try:
             imp.save()
         except IntegrityError:

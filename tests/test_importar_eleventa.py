@@ -280,7 +280,7 @@ def test_el_codigo_no_ejecuta_nada_con_data_only(monkeypatch):
 # ------------------------------------------------------------------ 5. validacion de la subida
 def test_subida_con_extension_incorrecta(adm):
     r = subir(adm, b"x", "datos.txt")
-    assert r.status_code == 200 and "Solo se aceptan archivos .xlsx o .csv" in r.content.decode()
+    assert r.status_code == 200 and "Solo se aceptan archivos .xls, .xlsx o .csv" in r.content.decode()
     assert ImportacionEleventa.objects.count() == 0
 
 
@@ -289,11 +289,17 @@ def test_subida_de_mas_de_5_mb(adm):
     assert r.status_code == 200 and "5 MB" in r.content.decode() and ImportacionEleventa.objects.count() == 0
 
 
-@pytest.mark.parametrize("contenido", [b"esto no es un zip", b"PK\x03\x04roto" + b"\x00" * 50])
-def test_subida_de_xlsx_corrupto(adm, contenido):
-    r = subir(adm, contenido, "malo.xlsx")
+def test_subida_de_xlsx_corrupto(adm):
+    r = subir(adm, b"PK\x03\x04roto" + b"\x00" * 50, "malo.xlsx")        # firma de Excel pero dañado
     assert r.status_code == 200 and ("no es un .xlsx válido" in r.content.decode()
                                      or "No se pudo abrir" in r.content.decode())
+    assert ImportacionEleventa.objects.count() == 0
+
+
+def test_texto_con_extension_xlsx_se_lee_por_contenido_y_sin_encabezados_se_rechaza(adm):
+    # D-59: el formato se decide por el contenido, no por la extension: texto plano sin encabezados
+    r = subir(adm, b"esto no es un zip", "malo.xlsx")
+    assert r.status_code == 200 and "encabezados obligatorios" in r.content.decode()
     assert ImportacionEleventa.objects.count() == 0
 
 
