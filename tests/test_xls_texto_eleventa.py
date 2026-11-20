@@ -64,7 +64,7 @@ def xlsx_bytes():
 
 def esperar_filas(filas):
     assert [f.codigo for f in filas] == ["0077", "A100", "B200"]
-    assert filas[0].descripcion.startswith("Filtro de aceite ñandú") and filas[0].costo == D("1234.50")
+    assert filas[0].descripcion.startswith("Filtro de aceite ñandú") and filas[0].costo == D("1235")
     assert filas[1].precio_venta == D("9990") and filas[0].inventario == D("10") and filas[2].inventario == D("0")
     assert filas[0].departamento == "Filtros" and filas[0].minimo == D("2")
 
@@ -195,7 +195,7 @@ def test_confirmar_una_importacion_de_xls_de_texto_crea_los_productos(adm):
     assert r.status_code == 302
     assert sorted(Producto.objects.values_list("sku", flat=True)) == ["0077", "A100", "B200"]
     p = Producto.objects.get(sku="0077")
-    assert p.nombre.startswith("Filtro de aceite ñandú") and p.costo == D("1234.50")
+    assert p.nombre.startswith("Filtro de aceite ñandú") and p.costo == D("1235")
     assert servicios.stock_de(p) == D("10.00") and p.categoria.nombre == "Filtros"
     assert Producto.objects.get(sku="A100").nombre == "Aceite “sintético” 5W30"
 
@@ -212,13 +212,12 @@ def test_la_pantalla_de_subida_dice_xls_xlsx_o_csv(adm):
 
 
 # ------------------------------------------------------------------ D-48 a D-51 siguen valiendo
-def test_d50_separador_decimal_por_columna_en_el_texto():
-    filas = [["C1", "x", "1.500", "10", "10", "1", "0", ""], ["C2", "y", "2,5", "10", "10", "1", "0", ""]]
+def test_d61_los_puntos_y_comas_se_leen_como_pesos_en_el_texto():
+    filas = [["C1", "x", "1.500", "10.990", "10", "1", "0", ""], ["C2", "y", "2,5", "15,990.00", "10", "1,000", "3,5", ""]]
     a = imp.analizar_contenido(texto(filas=filas).encode("cp1252"), "F.xls")
-    assert a[0].costo == D("1500") and a[1].costo == D("2.5") and a[0].valida                 # evidencia en la columna
-    solo = [["C1", "x", "1.500", "10", "10", "1", "0", ""]]
-    amb = imp.analizar_contenido(texto(filas=solo).encode("cp1252"), "F.xls")[0]
-    assert not amb.valida and "ambiguo" in amb.errores[0]                                  # sin evidencia: error
+    assert a[0].costo == D(1500) and a[0].precio_venta == D(10990) and a[0].valida                 # 1.500 es 1500 pesos
+    assert a[1].costo == D(3) and a[1].precio_venta == D(15990) and a[1].inventario == D(1000) and a[1].minimo == D("3.50")
+    assert a[1].valida and any("se redondeó al peso" in x for x in a[1].advertencias)
 
 
 def test_los_codigos_nunca_se_alteran_y_el_saneo_sigue_igual():
@@ -260,7 +259,7 @@ def test_xls_con_tab_y_comillas_sueltas_o_en_pares_separa_cada_fila_y_conserva_e
     assert [f.codigo for f in filas] == [f"Q{i}" for i in range(len(DESCRIPCIONES))]          # ninguna fila se junto
     assert [f.descripcion for f in filas] == DESCRIPCIONES                                    # texto tal cual, comillas incluidas
     assert [f.inventario for f in filas] == [D(i + 1) for i in range(len(DESCRIPCIONES))]
-    assert all(f.valida and f.costo == D("1234.50") for f in filas)
+    assert all(f.valida and f.costo == D("1235") for f in filas)
 
 
 def test_la_comilla_suelta_no_se_come_caracteres_ni_filas_siguientes():
@@ -298,7 +297,7 @@ def test_csv_con_punto_y_coma_y_campos_entre_comillas_sigue_funcionando():
         '0077;"Filtro; de aceite";1.234,50;2.500,00;2.000,00;10;2;Filtros\n'
     ).encode("utf-8")
     filas = imp.analizar_contenido(contenido, "x.csv")
-    assert filas[0].descripcion == "Filtro; de aceite" and filas[0].costo == D("1234.50")
+    assert filas[0].descripcion == "Filtro; de aceite" and filas[0].costo == D("1235")
 
 
 def test_con_tab_las_comillas_son_literales_y_con_punto_y_coma_se_respetan():
@@ -700,3 +699,39 @@ def test_encabezado_opcional_repetido_no_invalida():
     cab = ENCABEZADO_REAL + "\tPrecio Costo"
     a = imp.analizar_contenido((cab + "\nA1\tX\t1\t1\t1\t5\t0\tD\t9\n").encode("cp1252"), "F.xls")
     assert a[0].valida and a[0].costo == D(1)                                       # gana la primera columna
+
+
+# ------------------------------------------------------------------ D-61: confirmacion completa con precios «15.990» y stock «5.00»
+def test_confirmacion_completa_de_un_archivo_tab_en_formato_eleventa_con_pesos_y_stock_entero(adm):
+    filas = [
+        ["0077", "Filtro de aceite universal", "8.990", "15.990", "13.990", "5.00", "2.00", "Filtros"],
+        ["A100", "Aceite 5W30 ñandú 4L", "12.500", "19.990", "17.990", "12,00", "3", "Aceites"],
+        ["B200", "Bujía iridio", "2.990", "5.990", "4.990", "1.000", "100", "Bujías"],
+    ]
+    r = subir(adm, texto(filas=filas, titulo=False, totales=False).encode("cp1252"), "FILTROS.xls")
+    assert r.status_code == 302
+    i = ImportacionEleventa.objects.get()
+    t = adm.get(reverse("importar_vista_previa", args=[i.pk])).content.decode()
+    assert "$8.990" in t and "$12.500" in t and "$2.990" in t and "ambiguo" not in t and "Error" not in t
+    assert i.analisis["codificacion"] == "Windows-1252"
+    url = reverse("importar_vista_previa", args=[i.pk])
+    token = re.search(r'name="token" value="([^"]+)"', t).group(1)
+    assert adm.post(url, {"token": token, "accion": "confirmar"}).status_code == 302
+    p = Producto.objects.get(sku="0077")
+    assert (p.costo, p.precio_venta, p.precio_mayoreo, p.stock_min) == (D("8990"), D("15990"), D("13990"), D("2"))
+    assert servicios.stock_de(p) == D("5.00")
+    a = Producto.objects.get(sku="A100")
+    assert (a.costo, a.precio_venta, a.precio_mayoreo, a.stock_min) == (D("12500"), D("19990"), D("17990"), D("3"))
+    assert servicios.stock_de(a) == D("12.00")
+    b = Producto.objects.get(sku="B200")
+    assert (b.costo, b.precio_venta, b.stock_min) == (D("2990"), D("5990"), D("100")) and servicios.stock_de(b) == D("1000.00")
+    i.refresh_from_db()
+    assert i.resumen["creados"] == 3 and i.resumen["con_error"] == 0
+    resumen = adm.get(reverse("importar_resumen", args=[i.pk])).content.decode()
+    assert "1.017" in resumen                                                     # 5 + 12 + 1.000 unidades, sin decimales
+
+
+def test_las_columnas_corridas_siguen_siendo_error_con_las_reglas_clp():
+    corrida = "0077\tMANGUERA\t1/2 REFORZADA\t8.990\t15.990\t13.990\t5\t2\t"
+    a = imp.analizar_contenido(_archivo(corrida, NORMAL_SIN_DEPTO), "F.xls")
+    assert not a[0].valida and a[1].valida

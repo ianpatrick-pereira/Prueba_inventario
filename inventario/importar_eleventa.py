@@ -452,23 +452,109 @@ def _codigo(celda, advertencias, errores):
     return t
 
 
-def _monto(celda, modo, adv, errores, etiqueta, maximo=MAX_MONTO, texto_es_error=False):
+# ----------------------------------------------------------------------------- lectura de numeros de Eleventa (D-61)
+# D-61 reemplaza a D-50 SOLO en este importador: los montos son pesos chilenos sin centavos y el stock casi
+# siempre es entero, asi que el punto o la coma jamas es ambiguo. D-50 (parsear_decimal/detectar_modo) sigue
+# disponible para cualquier otro uso.
+def _parsear_clp(texto):
+    """Texto -> Decimal exacto (con sus decimales) o None si no es un numero.
+
+    - Un punto o coma seguido de EXACTAMENTE 3 cifras es separador de miles («15.990», «15,990», «1.234.567»).
+    - Un punto o coma seguido de 1 o 2 cifras AL FINAL es la parte decimal («15990,00», «1.234,50», «3,5»).
+    - Con ambos separadores el ultimo es el decimal («15.990,00», «15,990.00»).
+    - Un grupo inicial que empieza con 0 no es de miles: «0,500» es 0,5 (no 500).
+    Los espacios siguen la regla R3 (solo grupos de 3 cifras como miles)."""
+    signo, t = _limpiar_texto_numerico(texto)
+    if not t or not re.fullmatch(r"[0-9.,]+", t, re.ASCII):
+        return None
+    grupos = re.split(r"[.,]", t)
+    if len(grupos) == 1:
+        return Decimal(signo + t)
+    primero, intermedios, ultimo = grupos[0], grupos[1:-1], grupos[-1]
+    if ultimo == "" or any(len(g) != 3 or not g for g in intermedios):
+        return None                                   # «15.», «1..2», «1.23.456»
+    miles_ok = 1 <= len(primero) <= 3 and not (len(primero) > 1 and primero.startswith("0")) and primero != "0"
+    if len(ultimo) == 3 and miles_ok:                 # ... el ultimo grupo de 3 cifras: todos son miles
+        return Decimal(signo + primero + "".join(intermedios) + ultimo)
+    if len(ultimo) == 3 and not miles_ok and (len(intermedios) > 0 or len(primero) > 3):
+        return None                                   # «1234.567», «0.123.456»: no es un numero valido
+    # parte decimal: 1 o 2 cifras (o 4 o mas, o un cero inicial: «0,500»)
+    entero = (primero + "".join(intermedios)) or "0"
+    if intermedios and not miles_ok:
+        return None
+    return Decimal(f"{signo}{entero}.{ultimo}")
+
+
+def _a_decimal_clp(valor):
+    """int, float de Excel, Decimal o texto -> Decimal exacto (o None). Sin pasar por float para el texto."""
+    if valor is None or isinstance(valor, bool):
+        return None
+    if isinstance(valor, Decimal):
+        return valor if valor.is_finite() else None
+    if isinstance(valor, int):
+        return Decimal(valor)
+    if isinstance(valor, float):
+        return Decimal(repr(valor)) if valor == valor and abs(valor) != float("inf") else None
+    return _parsear_clp(valor)
+
+
+def leer_monto_clp(valor):
+    """Monto en pesos chilenos. Devuelve (Decimal entero | None, redondeado). Los centavos se redondean al
+    peso (la mitad se aleja del cero) y se informa; nunca hay error por ambiguedad de separador."""
+    d = _a_decimal_clp(valor)
+    if d is None:
+        return None, False
+    entero = d.quantize(Decimal(1), rounding=ROUND_HALF_UP)
+    return entero, entero != d
+
+
+def leer_cantidad(valor):
+    """Cantidad de stock. Devuelve (Decimal | None, con_decimales). Entero si la parte decimal es 0; si trae
+    decimales distintos de 0 NO se redondea al entero: se conserva con 2 decimales (el modelo los admite)."""
+    d = _a_decimal_clp(valor)
+    if d is None:
+        return None, False
+    if d == d.to_integral_value():
+        return d.quantize(Decimal(1)), False
+    return d.quantize(CENTAVO, rounding=ROUND_HALF_UP), True
+
+
+def _texto_crudo(celda):
+    return str(celda)[:30]
+
+
+def _monto_clp(celda, adv, errores, etiqueta, texto_es_error=False):
     if celda is None or (isinstance(celda, str) and not celda.strip()):
         return Decimal("0")
-    d = parsear_decimal(celda, modo)
-    if d is AMBIGUO:
-        errores.append(f"{etiqueta}: valor ambiguo («{str(celda)[:30]}»): no se sabe si el punto o la coma es decimal.")
+    valor, redondeado = leer_monto_clp(celda)
+    if valor is None:
+        if texto_es_error:       # en archivos de texto, un texto que no es numero es error de fila (R2)
+            errores.append(f"{etiqueta}: texto no numérico («{_texto_crudo(celda)}»): no se importa la fila.")
+        else:
+            adv.append(f"{etiqueta}: valor no válido («{_texto_crudo(celda)}»), queda en 0.")
         return Decimal("0")
-    if d is None and texto_es_error:       # afecta el stock: un texto que no es numero es error de fila
-        errores.append(f"{etiqueta}: texto no numérico («{str(celda)[:30]}»): no se importa la fila.")
+    if valor < 0 or valor > MAX_MONTO:
+        adv.append(f"{etiqueta}: valor no válido («{_texto_crudo(celda)}»), queda en 0.")
         return Decimal("0")
-    if d is None or d < 0 or d > maximo:
-        adv.append(f"{etiqueta}: valor no válido («{str(celda)[:30]}»), queda en 0.")
+    if redondeado:
+        adv.append(f"{etiqueta}: se redondeó al peso ({_texto_crudo(celda)}).")
+    return valor
+
+
+def _cantidad_minimo(celda, adv, errores, etiqueta):
+    """Inv. minimo: texto no numerico es error (afecta el stock); negativo o enorme, advertencia y 0."""
+    if celda is None or (isinstance(celda, str) and not celda.strip()):
         return Decimal("0")
-    r = _redondear(d)
-    if r != d:
-        adv.append(f"{etiqueta}: redondeado a 2 decimales ({celda}).")
-    return r
+    valor, decimales = leer_cantidad(celda)
+    if valor is None:
+        errores.append(f"{etiqueta}: texto no numérico («{_texto_crudo(celda)}»): no se importa la fila.")
+        return Decimal("0")
+    if valor < 0 or valor > MAX_CANTIDAD:
+        adv.append(f"{etiqueta}: valor no válido («{_texto_crudo(celda)}»), queda en 0.")
+        return Decimal("0")
+    if decimales:
+        adv.append(f"{etiqueta}: stock con decimales (producto a granel?).")
+    return valor
 
 
 def _valor(fila, mapa, clave):
@@ -517,38 +603,28 @@ def analizar_contenido(contenido, nombre):
     if es_texto and utiles:    # la cantidad de celdas crudas (con vacias) mas frecuente: lo normal de este archivo
         cuentas = Counter(len(celdas) for _, celdas in utiles)
         moda = max(cuentas, key=lambda n: (cuentas[n], -n))      # empate: la menor (lo dudoso se marca)
-    modos = {
-        c: detectar_modo(_valor(celdas, mapa, c) for _, celdas in utiles) for c in COLUMNAS_NUMERICAS
-    }
     for numero, celdas in utiles:
         f = Fila(numero=numero)
         adv, err = f.advertencias, f.errores
         f.codigo = _codigo(_valor(celdas, mapa, "codigo"), adv, err)
         f.descripcion = _texto(_valor(celdas, mapa, "descripcion"), adv, "Descripción")
         f.departamento = _texto(_valor(celdas, mapa, "departamento"), adv, "Departamento")
-        f.costo = _monto(_valor(celdas, mapa, "costo"), modos["costo"], adv, err, "Precio costo",
-                       texto_es_error=es_texto)
-        f.precio_venta = _monto(_valor(celdas, mapa, "precio_venta"), modos["precio_venta"], adv, err, "Precio venta",
-                       texto_es_error=es_texto)
-        f.precio_mayoreo = _monto(_valor(celdas, mapa, "precio_mayoreo"), modos["precio_mayoreo"], adv, err, "Precio mayoreo",
-                       texto_es_error=es_texto)
-        f.minimo = _monto(_valor(celdas, mapa, "minimo"), modos["minimo"], adv, err, "Inv. mínimo", MAX_CANTIDAD,
-                        texto_es_error=True)
+        f.costo = _monto_clp(_valor(celdas, mapa, "costo"), adv, err, "Precio costo", es_texto)
+        f.precio_venta = _monto_clp(_valor(celdas, mapa, "precio_venta"), adv, err, "Precio venta", es_texto)
+        f.precio_mayoreo = _monto_clp(_valor(celdas, mapa, "precio_mayoreo"), adv, err, "Precio mayoreo", es_texto)
+        f.minimo = _cantidad_minimo(_valor(celdas, mapa, "minimo"), adv, err, "Inv. mínimo")
         inv_crudo = _valor(celdas, mapa, "inventario")
-        inv = parsear_decimal(inv_crudo, modos["inventario"])
-        if inv is AMBIGUO:
-            err.append(f"Inventario: valor ambiguo («{str(inv_crudo)[:30]}»): no se sabe si el punto o la coma es decimal.")
-            f.inventario = None
-        elif inv is None and inv_crudo is not None and str(inv_crudo).strip() != "":
-            err.append(f"Inventario: texto no numérico («{str(inv_crudo)[:30]}»): no se importa la fila.")
+        inv, con_decimales = leer_cantidad(inv_crudo)
+        if inv is None and inv_crudo is not None and str(inv_crudo).strip() != "":
+            err.append(f"Inventario: texto no numérico («{_texto_crudo(inv_crudo)}»): no se importa la fila.")
             f.inventario = None
         elif inv is None or inv < 0 or inv > MAX_CANTIDAD:
-            adv.append(f"Inventario no válido o negativo («{str(inv_crudo)[:30]}»): se importa sin stock.")
+            adv.append(f"Inventario no válido o negativo («{_texto_crudo(inv_crudo)}»): se importa sin stock.")
             f.inventario = None
         else:
-            f.inventario = _redondear(inv)
-            if f.inventario != inv:
-                adv.append(f"Inventario redondeado a 2 decimales ({inv_crudo}).")
+            f.inventario = inv
+            if con_decimales:
+                adv.append("Inventario: stock con decimales (producto a granel?).")
         if es_texto:
             n = len(_recortar(celdas))
             crudas = len(celdas)
