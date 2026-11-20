@@ -23,6 +23,9 @@
   {% if r.pasaron_a_existentes %}
   <ul class="mensajes"><li class="warning">{{ r.pasaron_a_existentes }} fila{{ r.pasaron_a_existentes|pluralize }} pasaron a existentes desde la vista previa y no recibieron stock (otra persona creó esos códigos mientras tanto).</li></ul>
   {% endif %}
+  {% if r.no_actualizados_mala_lectura %}
+  <ul class="mensajes"><li class="warning">{{ r.no_actualizados_mala_lectura|length }} producto{{ r.no_actualizados_mala_lectura|length|pluralize }} existente{{ r.no_actualizados_mala_lectura|length|pluralize }} no se actualizó por posible mala lectura de tildes: {{ r.no_actualizados_mala_lectura|join:", " }}.</li></ul>
+  {% endif %}
   {% if r.diferencias %}
   <h2>Diferencias en productos existentes (no se modificó su stock)</h2>
   <div class="tabla-scroll"><table><thead><tr><th>Código</th><th class="num">Archivo</th><th class="num">Sistema</th><th class="num">Diferencia</th></tr></thead>

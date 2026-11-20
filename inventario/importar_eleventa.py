@@ -174,6 +174,11 @@ def _ubicar_encabezados(filas):
                 if n in nombres and clave not in mapa:
                     mapa[clave] = j
         if all(o in mapa for o in OBLIGATORIAS):
+            for clave in OBLIGATORIAS:
+                if sum(n in COLUMNAS[clave] for n in normas) > 1:
+                    raise ArchivoInvalido(
+                        f"El encabezado «{NOMBRES_VISIBLES[clave]}» está repetido en el archivo: "
+                        "debe haber una sola columna con ese nombre. Revisa la exportación de Eleventa.")
             return i, mapa
     return None
 
@@ -227,11 +232,21 @@ _GRUPOS_COMA = re.compile(r"[0-9]{1,3}(,[0-9]{3})+", re.ASCII)
 _CARACTERES = re.compile(r"[0-9.,]+", re.ASCII)
 
 
+_ESPACIOS_MILES = re.compile(r"[0-9]{1,3}(?:[ \xa0][0-9]{3})+(?:[.,][0-9]*)?", re.ASCII)
+
+
 def _limpiar_texto_numerico(valor):
-    t = str(valor).strip().replace("$", "").replace(" ", "").replace("\xa0", "")
+    """Quita «$» y los espacios de los extremos (incluido el espacio duro). Un espacio DENTRO del numero solo
+    vale como separador de miles en grupos exactos de 3 cifras («1 500», «12 345 678»); «1 5» o «15 00»
+    no son numeros (se devuelve texto vacio => no numerico)."""
+    t = str(valor).replace("$", "").strip()
     signo = ""
     if t[:1] in ("+", "-"):
-        signo, t = ("-" if t[0] == "-" else ""), t[1:]
+        signo, t = ("-" if t[0] == "-" else ""), t[1:].strip()
+    if re.search(r"\s", t):
+        if not _ESPACIOS_MILES.fullmatch(t):
+            return signo, ""
+        t = re.sub(r"[ \xa0]", "", t)
     return signo, t
 
 
@@ -344,13 +359,14 @@ class Fila:
     advertencias: list = field(default_factory=list)
     stock_sistema: Decimal | None = None
     diferencia: Decimal | None = None
+    mala_lectura: bool = False    # advertencia de posible mala decodificacion de tildes
 
     @property
     def valida(self):
         return not self.errores
 
     CAMPOS_GUARDADOS = ("numero", "codigo", "descripcion", "departamento", "costo", "precio_venta",
-                        "precio_mayoreo", "inventario", "minimo", "errores", "advertencias")
+                        "precio_mayoreo", "inventario", "minimo", "errores", "advertencias", "mala_lectura")
 
     def a_dict(self):
         """Forma guardable en JSON (los Decimal van como texto)."""
@@ -364,6 +380,8 @@ class Fila:
     def de_dict(cls, d):
         f = cls(numero=d["numero"])
         for k in cls.CAMPOS_GUARDADOS[1:]:
+            if k not in d:          # analisis guardados antes de agregar el campo
+                continue
             v = d[k]
             if k in ("costo", "precio_venta", "precio_mayoreo", "minimo"):
                 v = Decimal(v)
@@ -508,9 +526,12 @@ def analizar_contenido(contenido, nombre):
         f.codigo = _codigo(_valor(celdas, mapa, "codigo"), adv, err)
         f.descripcion = _texto(_valor(celdas, mapa, "descripcion"), adv, "Descripción")
         f.departamento = _texto(_valor(celdas, mapa, "departamento"), adv, "Departamento")
-        f.costo = _monto(_valor(celdas, mapa, "costo"), modos["costo"], adv, err, "Precio costo")
-        f.precio_venta = _monto(_valor(celdas, mapa, "precio_venta"), modos["precio_venta"], adv, err, "Precio venta")
-        f.precio_mayoreo = _monto(_valor(celdas, mapa, "precio_mayoreo"), modos["precio_mayoreo"], adv, err, "Precio mayoreo")
+        f.costo = _monto(_valor(celdas, mapa, "costo"), modos["costo"], adv, err, "Precio costo",
+                       texto_es_error=es_texto)
+        f.precio_venta = _monto(_valor(celdas, mapa, "precio_venta"), modos["precio_venta"], adv, err, "Precio venta",
+                       texto_es_error=es_texto)
+        f.precio_mayoreo = _monto(_valor(celdas, mapa, "precio_mayoreo"), modos["precio_mayoreo"], adv, err, "Precio mayoreo",
+                       texto_es_error=es_texto)
         f.minimo = _monto(_valor(celdas, mapa, "minimo"), modos["minimo"], adv, err, "Inv. mínimo", MAX_CANTIDAD,
                         texto_es_error=True)
         inv_crudo = _valor(celdas, mapa, "inventario")
@@ -534,6 +555,10 @@ def analizar_contenido(contenido, nombre):
             if n > meta["ancho"]:   # nunca se corren valores: una celda de mas desplazaria precios e inventario
                 err.append(f"La fila tiene {n} columnas y el encabezado {meta['ancho']}: "
                            "revisa la descripción en Eleventa.")
+            elif crudas < moda:
+                # una fila MAS CORTA que el resto del archivo tambien se rechaza: faltan celdas y no se sabe cuales
+                err.append(f"La fila tiene {crudas} columnas y el resto del archivo {moda}: "
+                           "revisa la descripción en Eleventa.")
             elif crudas > moda and crudas > meta["ancho"]:
                 # tambien con celdas vacias de mas (Departamento suele venir vacio): un TAB dentro de la
                 # descripcion corre todo a la derecha. Si TODO el archivo trae una columna de mas, es normal.
@@ -542,6 +567,7 @@ def analizar_contenido(contenido, nombre):
             if meta["codificacion"] == "Windows-1252" and any(
                     _MOJIBAKE.search(x) for x in (f.codigo, f.descripcion, f.departamento)):
                 adv.append("Texto con posible mala decodificación (mezcla de codificaciones): revisa los acentos.")
+                f.mala_lectura = True
         if not f.codigo:
             err.append("Código vacío.")
         elif len(f.codigo) > 50:
@@ -725,6 +751,10 @@ def _aplicar(importacion_id, usuario, filas, actualizar_existentes):
              "diferencia": str(f.diferencia)}
             for f in existentes if f.diferencia is not None and f.diferencia != 0
         ]
+        # R4: una fila con posible mala lectura de tildes NUNCA actualiza datos de un producto existente
+        no_actualizados = [f.codigo for f in existentes if f.mala_lectura]
+        if actualizar_existentes:
+            existentes = [f for f in existentes if not f.mala_lectura]
         if actualizar_existentes and existentes:
             por_sku = {}
             for lote in _en_lotes([f.codigo for f in existentes]):
@@ -762,6 +792,7 @@ def _aplicar(importacion_id, usuario, filas, actualizar_existentes):
             "creados": len(productos), "actualizados": actualizados, "productos_con_stock": len(con_stock),
             "unidades_cargadas": str(sum((c for _, c in con_stock), Decimal("0"))),
             "diferencias": diferencias,
+            "no_actualizados_mala_lectura": no_actualizados if actualizar_existentes else [],
             "errores": [{"fila": f.numero, "codigo": f.codigo, "mensajes": f.errores}
                         for f in filas if f.estado == "error"],
             "omitidas": filas.omitidas, "vacias": filas.vacias,

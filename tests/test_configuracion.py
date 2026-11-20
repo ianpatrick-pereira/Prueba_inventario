@@ -48,3 +48,17 @@ def test_idioma_y_zona_horaria():
     assert settings.LANGUAGE_CODE == "es-cl"
     assert settings.TIME_ZONE == "America/Santiago"
     assert settings.USE_TZ is True
+
+
+def test_settings_de_pruebas_fuerzan_debug_false_aunque_la_terminal_tenga_debug_1():
+    """config.settings_test fija DEBUG=False antes de importar settings: valores calculados al importar
+    (como SESSION_COOKIE_SECURE) no dependen de lo que haya exportado en la terminal."""
+    env = {k: v for k, v in os.environ.items() if k not in ("SECRET_KEY", "DEBUG", "ALLOWED_HOSTS")}
+    env.update({"DEBUG": "1", "DJANGO_SETTINGS_MODULE": "config.settings_test"})
+    r = subprocess.run(
+        [sys.executable, "-c", "from django.conf import settings as s; print(s.DEBUG, s.SESSION_COOKIE_SECURE, s.CSRF_COOKIE_SECURE)"],
+        cwd=BASE_DIR, env=env, capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "False True True"
+    assert os.environ["DEBUG"] == "False"          # ya forzado en este proceso de pruebas

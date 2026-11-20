@@ -330,7 +330,7 @@ def test_punto_y_coma_sin_comillas_dentro_de_la_descripcion_en_csv_es_error():
     cab = ENCABEZADO_REAL.replace("\t", ";")
     contenido = f"{cab}\n0077;MANGUERA; REFORZADA;1.234,50;2.500,00;2.000,00;10;2;Filtros\n".encode("utf-8")
     f = imp.analizar_contenido(contenido, "F.csv")[0]
-    assert not f.valida and "La fila tiene 9 columnas y el encabezado 8" in f.errores[0]
+    assert not f.valida and any("La fila tiene 9 columnas y el encabezado 8" in e for e in f.errores)
 
 
 def test_si_todo_el_archivo_trae_una_columna_vacia_de_mas_es_normal_y_se_acepta():
@@ -504,7 +504,7 @@ def test_en_un_archivo_con_una_columna_de_mas_una_fila_con_aun_mas_es_error():
     base = [f + "\t" for f in (NORMAL_SIN_DEPTO, "C2\tOTRO\t1\t2\t3\t4\t0\tD", "D3\tUNO\t5\t6\t7\t8\t1\t")]
     a = imp.analizar_contenido(_archivo(*base, "E4\tTAB\tDE MAS\t1\t2\t3\t4\t0\t\t"), "F.xls")
     assert [f.valida for f in a] == [True, True, True, False]
-    assert "La fila tiene 10 columnas y el resto del archivo 9" in a[3].errores[0]
+    assert any("La fila tiene 10 columnas y el resto del archivo 9" in e for e in a[3].errores)
 
 
 def test_la_moda_es_la_cantidad_mas_frecuente_y_en_empate_se_marca_la_mas_larga():
@@ -514,9 +514,9 @@ def test_la_moda_es_la_cantidad_mas_frecuente_y_en_empate_se_marca_la_mas_larga(
     assert [f.valida for f in muchas] == [True] * 5 + [False]
 
 
-def test_filas_cortas_no_son_error_por_la_moda():
-    a = imp.analizar_contenido(_archivo(NORMAL_SIN_DEPTO, "C2\tCORTA\t1\t2\t3\t4", NORMAL_SIN_DEPTO.replace("B1", "B2")), "F.xls")
-    assert all(f.valida for f in a)
+def test_filas_con_mas_celdas_vacias_que_el_resto_siguen_siendo_normales_si_todas_son_iguales():
+    todas_cortas = imp.analizar_contenido(_archivo("A1\tX\t1\t2\t3\t4", "A2\tY\t1\t2\t3\t5"), "F.xls")
+    assert all(f.valida for f in todas_cortas)             # TODAS cortas por igual: es la forma del archivo
 
 
 def test_las_filas_de_totales_y_vacias_no_alteran_la_moda():
@@ -542,8 +542,14 @@ def test_inv_minimo_con_texto_no_numerico_es_error():
     assert not f.valida and "Inv. mínimo: texto no numérico («poco»)" in f.errores[0]
 
 
-def test_precio_con_texto_no_numerico_sigue_siendo_advertencia_y_queda_en_0():
-    f = imp.analizar_contenido(_archivo("A1\tX\tgratis\t$\tn/a\t5\t0\tD"), "F.xls")[0]
+def test_precio_con_texto_no_numerico_en_xlsx_sigue_siendo_advertencia_y_queda_en_0():
+    wb = Workbook()
+    ws = wb.active
+    ws.append(ENCABEZADO_REAL.split("\t"))
+    ws.append(["A1", "X", "gratis", "$", "n/a", 5, 0, "D"])
+    b = io.BytesIO()
+    wb.save(b)
+    f = imp.analizar_contenido(b.getvalue(), "F.xlsx")[0]                                  # xlsx no cambia
     assert f.valida and f.costo == D(0) and f.precio_venta == D(0) and f.precio_mayoreo == D(0)
     assert sum("valor no válido" in a for a in f.advertencias) == 3
 
@@ -552,3 +558,145 @@ def test_inventario_vacio_negativo_o_fuera_de_rango_siguen_siendo_advertencia():
     a = imp.analizar_contenido(_archivo("A1\tX\t1\t1\t1\t\t0\tD", "A2\tY\t1\t1\t1\t-4\t0\tD",
                                         "A3\tZ\t1\t1\t1\t99999999999999\t0\tD"), "F.xls")
     assert all(f.valida and f.inventario is None and any("sin stock" in x for x in f.advertencias) for f in a)
+
+
+# ------------------------------------------------------------------ R1: filas mas cortas que el resto, en texto
+def test_fila_mas_corta_que_la_moda_es_error_caso_del_auditor():
+    corta = "L1\tdesc\t200\t150\t5\t1\t"                      # 7 celdas crudas en un archivo de 8
+    a = imp.analizar_contenido(_archivo(NORMAL_SIN_DEPTO, "C2\tOTRO\t1\t2\t3\t4\t0\t", corta), "F.xls")
+    assert [f.valida for f in a] == [True, True, False]
+    assert "La fila tiene 7 columnas y el resto del archivo 8: revisa la descripción en Eleventa." in a[2].errores
+
+
+def test_fila_corta_en_archivo_con_columna_de_mas_sistematica_tambien_es_error():
+    base = [f + "\t" for f in (NORMAL_SIN_DEPTO, "C2\tOTRO\t1\t2\t3\t4\t0\t")]
+    a = imp.analizar_contenido(_archivo(*base, NORMAL_SIN_DEPTO.replace("B1", "B9")), "F.xls")   # 8 en un archivo de 9
+    assert [f.valida for f in a] == [True, True, False] and "resto del archivo 9" in a[2].errores[0]
+
+
+# ------------------------------------------------------------------ R2: texto no numerico en CUALQUIER columna numerica
+def test_archivo_de_una_sola_fila_corrida_es_error():
+    a = imp.analizar_contenido(_archivo(TAB_EN_DESCRIPCION), "F.xls")                     # 9 celdas, Departamento vacio
+    assert not a[0].valida and any("Precio costo: texto no numérico («1/2 REFORZADA»)" in e for e in a[0].errores)
+
+
+def test_dos_de_tres_filas_corridas_son_error_en_ambas():
+    c1 = "0077\tMANGUERA\t1/2 REFORZADA\t1.234,50\t2.500,00\t2.000,00\t10\t2\t"
+    c2 = "0078\tTUBO\t3/4 DOBLE\t900,00\t1.800,00\t1.500,00\t4\t1\t"
+    a = imp.analizar_contenido(_archivo(c1, c2, "B1\tNORMAL\t1.000,00\t2.000,00\t1.500,00\t3\t1\tAceites\t"), "F.xls")
+    assert [f.valida for f in a][:2] == [False, False]
+    assert all(any("texto no numérico" in e for e in f.errores) for f in a[:2])
+
+
+@pytest.mark.parametrize("columna,idx", [("Precio costo", 2), ("Precio venta", 3), ("Precio mayoreo", 4), ("Inventario", 5), ("Inv. mínimo", 6)])
+def test_texto_no_numerico_en_cada_columna_numerica_es_error_en_archivos_de_texto(columna, idx):
+    celdas = ["A1", "X", "1", "1", "1", "5", "0", "D"]
+    celdas[idx] = "abc"
+    f = imp.analizar_contenido(_archivo("\t".join(celdas)), "F.xls")[0]
+    assert not f.valida and any(f"{columna}: texto no numérico («abc»)" in e for e in f.errores)
+
+
+def test_celda_numerica_vacia_sigue_siendo_advertencia_y_queda_en_0():
+    f = imp.analizar_contenido(_archivo("A1\tX\t\t\t\t5\t0\tD"), "F.xls")[0]
+    assert f.valida and f.costo == D(0) and f.precio_venta == D(0) and f.precio_mayoreo == D(0) and f.inventario == D(5)
+
+
+def test_numeros_negativos_o_enormes_siguen_siendo_advertencia_en_texto():
+    f = imp.analizar_contenido(_archivo("A1\tX\t-5\t99999999999999999\t1\t5\t0\tD"), "F.xls")[0]
+    assert f.valida and f.costo == D(0) and f.precio_venta == D(0)
+
+
+# ------------------------------------------------------------------ R3: espacios dentro de un numero
+@pytest.mark.parametrize("texto_num,esperado", [
+    ("1 500", D("1500")), ("12 345 678", D("12345678")), ("1 500,50", D("1500.50")), ("-1 500", D("-1500")),
+    (" 1500 ", D("1500")), ("\xa01500\xa0", D("1500")), ("$ 1 500", D("1500")), ("999 999", D("999999")),
+])
+def test_espacios_como_separador_de_miles_en_grupos_de_3(texto_num, esperado):
+    assert imp.parsear_decimal(texto_num, "coma") == esperado
+
+
+@pytest.mark.parametrize("malo", ["1 5", "15 00", "1 50", "1 5000", "12 34 567", "1  500", "1 500 5", "1 500,5 0"])
+def test_espacios_que_no_son_grupos_de_3_no_son_numero(malo):
+    assert imp.parsear_decimal(malo, "coma") is None
+
+
+def test_espacio_mal_puesto_es_error_de_fila_en_texto():
+    for malo in ("1 5", "15 00"):
+        f = imp.analizar_contenido(_archivo(f"A1\tX\t{malo}\t1\t1\t5\t0\tD"), "F.xls")[0]
+        assert not f.valida and any("texto no numérico" in e for e in f.errores)
+    ok = imp.analizar_contenido(_archivo("A1\tX\t1 500\t2 000\t1 500\t5\t0\tD"), "F.xls")[0]
+    assert ok.valida and ok.costo == D(1500) and ok.precio_venta == D(2000)
+
+
+# ------------------------------------------------------------------ R4: mala lectura nunca actualiza existentes
+def _archivo_mixto(sku_mojibake):
+    cab = ENCABEZADO_REAL.encode("cp1252") + b"\n"
+    cp1252 = f"B2\tAceite ñandú\t100\t200\t150\t5\t1\tD\n".encode("cp1252")          # fuerza Windows-1252
+    mojibake = f"{sku_mojibake}\tBujía nueva\t999\t1999\t1500\t8\t3\tD\n".encode("utf-8")  # UTF-8 mezclado
+    return cab + cp1252 + mojibake
+
+
+def test_con_mala_lectura_no_se_actualiza_un_existente_aunque_se_pida(adm):
+    p = Producto.objects.create(sku="B1", nombre="Nombre original", costo=D("5"), stock_min=D("0"), stock_max=D("0"))
+    q = Producto.objects.create(sku="B2", nombre="Original B2", costo=D("7"), stock_min=D("0"), stock_max=D("0"))
+    subir(adm, _archivo_mixto("B1"))
+    i = ImportacionEleventa.objects.get()
+    url = reverse("importar_vista_previa", args=[i.pk])
+    t = adm.get(url).content.decode()
+    token = re.search(r'name="token" value="([^"]+)"', t).group(1)
+    adm.post(url, {"token": token, "accion": "confirmar", "actualizar_existentes": "on"})
+    p.refresh_from_db(), q.refresh_from_db()
+    assert p.nombre == "Nombre original" and p.costo == D("5")                  # B1 (mala lectura): NO se toca
+    assert q.nombre == "Aceite ñandú" and q.costo == D("100")                  # B2 (limpio): si se actualiza
+    i.refresh_from_db()
+    assert i.resumen["no_actualizados_mala_lectura"] == ["B1"] and i.resumen["actualizados"] == 1
+    r = adm.get(reverse("importar_resumen", args=[i.pk])).content.decode()
+    assert "no se actualizó por posible mala lectura de tildes" in r and "B1" in r
+
+
+def test_sin_la_opcion_de_actualizar_no_se_menciona_nada(adm):
+    Producto.objects.create(sku="B1", nombre="Nombre original")
+    subir(adm, _archivo_mixto("B1"))
+    i = ImportacionEleventa.objects.get()
+    url = reverse("importar_vista_previa", args=[i.pk])
+    token = re.search(r'name="token" value="([^"]+)"', adm.get(url).content.decode()).group(1)
+    adm.post(url, {"token": token, "accion": "confirmar"})
+    i.refresh_from_db()
+    assert i.resumen["no_actualizados_mala_lectura"] == [] and Producto.objects.get(sku="B1").nombre == "Nombre original"
+
+
+def test_como_producto_nuevo_con_mala_lectura_se_crea_con_advertencia_visible(adm):
+    subir(adm, _archivo_mixto("N9"))
+    i = ImportacionEleventa.objects.get()
+    t = adm.get(reverse("importar_vista_previa", args=[i.pk])).content.decode()
+    assert "posible mala decodificación" in t
+    url = reverse("importar_vista_previa", args=[i.pk])
+    token = re.search(r'name="token" value="([^"]+)"', t).group(1)
+    adm.post(url, {"token": token, "accion": "confirmar", "actualizar_existentes": "on"})
+    assert Producto.objects.filter(sku="N9").exists()
+
+
+def test_la_marca_de_mala_lectura_se_guarda_con_el_analisis(adm):
+    subir(adm, _archivo_mixto("N9"))
+    filas = ImportacionEleventa.objects.get().analisis["filas"]
+    assert [f["mala_lectura"] for f in filas] == [False, True]
+    a = imp.Analisis.de_json({"filas": [{k: v for k, v in f.items() if k != "mala_lectura"} for f in filas], "omitidas": [], "vacias": 0})
+    assert [f.mala_lectura for f in a] == [False, False]                          # analisis antiguos sin el campo
+
+
+# ------------------------------------------------------------------ I2: encabezado obligatorio duplicado
+@pytest.mark.parametrize("cab", [
+    ENCABEZADO_REAL + "\tInventario", "Codigo\t" + ENCABEZADO_REAL, ENCABEZADO_REAL.replace("Descripcion", "Descripcion\tDescripcion"),
+    ENCABEZADO_REAL.replace("Departamento", "INVENTARIO"),
+])
+def test_encabezado_obligatorio_repetido_invalida_el_archivo(adm, cab):
+    contenido = (cab + "\nA1\tX\t1\t1\t1\t5\t0\tD\n").encode("cp1252")
+    r = subir(adm, contenido)
+    assert r.status_code == 200 and "está repetido en el archivo" in r.content.decode()
+    assert ImportacionEleventa.objects.count() == 0
+
+
+def test_encabezado_opcional_repetido_no_invalida():
+    cab = ENCABEZADO_REAL + "\tPrecio Costo"
+    a = imp.analizar_contenido((cab + "\nA1\tX\t1\t1\t1\t5\t0\tD\t9\n").encode("cp1252"), "F.xls")
+    assert a[0].valida and a[0].costo == D(1)                                       # gana la primera columna
