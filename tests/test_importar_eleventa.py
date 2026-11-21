@@ -230,14 +230,12 @@ def test_codigo_con_menos_no_pisa_al_codigo_existente(adm, actualizar):
     p = Producto.objects.create(sku="123", nombre="Original", costo=D("5"))
     i = preparar(adm, xlsx([["-123", "Intento de pisar", 99, 99, 99, 50, 0, "Dep"]]))
     r = adm.get(reverse("importar_vista_previa", args=[i.pk]))
-    assert r.context["resumen"]["con_error"] == 1 or r.context["resumen"]["para_revision"] == 1   # D-63: se crea para revision
+    assert r.context["resumen"]["con_error"] == 1 and r.context["resumen"]["para_revision"] == 0   # T1: error de codigo
     confirmar_http(adm, i, actualizar=actualizar)
     p.refresh_from_db()
     assert p.nombre == "Original" and p.costo == D("5") and Movimiento.objects.count() == 0
-    assert not Categoria.objects.exists()
-    nuevo = Producto.objects.get(sku="-123")                # D-63: no pisa al «123»; entra aparte, marcado, sin precios
-    assert Producto.objects.count() == 2 and nuevo.requiere_revision and nuevo.costo == 0 and nuevo.precio_venta == 0
-    assert ImportacionEleventa.objects.get().resumen["para_revision_filas"][0]["codigo"] == "-123"
+    assert Producto.objects.count() == 1 and not Categoria.objects.exists()      # «-123» no se crea ni pisa al «123»
+    assert ImportacionEleventa.objects.get().resumen["errores"][0]["codigo"] == "-123"
 
 
 def test_neutralizar_para_planilla():

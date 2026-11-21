@@ -291,8 +291,15 @@ def registrar_inventario_inicial_en_lote(filas, usuario, documento):
         for i in range(0, len(ids), 500):
             lote = ids[i:i + 500]
             # Se bloquean los productos ANTES de mirar sus movimientos (nadie les agrega uno en medio).
-            if len(list(Producto.objects.select_for_update().filter(pk__in=lote).values_list("pk", flat=True))) != len(lote):
+            bloqueados = list(Producto.objects.select_for_update().filter(pk__in=lote).values_list("pk", "activo", "sku"))
+            if len(bloqueados) != len(lote):
                 raise ValidationError("Un producto del inventario inicial ya no existe.")
+            archivados = [sku for _, activo, sku in bloqueados if not activo]      # D-64: tambien en el lote
+            if archivados:
+                raise ValidationError(
+                    f"El producto {archivados[0]} está archivado: reactívalo antes de registrar movimientos.",
+                    code="producto_archivado",
+                )
             if Movimiento.objects.filter(producto_id__in=lote).exists():
                 raise ValidationError("Un producto ya tiene movimientos: el inventario inicial solo se carga una vez.")
         return Movimiento.objects.bulk_create(movimientos, batch_size=500)

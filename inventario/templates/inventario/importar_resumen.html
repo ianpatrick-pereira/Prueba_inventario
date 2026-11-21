@@ -12,6 +12,7 @@
   <div class="rejilla tres">
     <div class="tarjeta"><div class="etiqueta-cifra">Productos creados</div><div class="cifra">{{ r.creados }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Creados para revisión</div><div class="cifra{% if r.creados_para_revision %} alerta{% endif %}">{{ r.creados_para_revision|default:0 }}</div>{% if r.creados_para_revision %}<a href="{% url 'producto_lista' %}?revision=1">Ver los productos por revisar</a>{% endif %}</div>
+    <div class="tarjeta"><div class="etiqueta-cifra">Completados (estaban en revisión)</div><div class="cifra">{{ r.completados|default:0 }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Productos con stock cargado</div><div class="cifra">{{ r.productos_con_stock }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Unidades cargadas</div><div class="cifra">{{ r.unidades_cargadas|cantidad }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Códigos alternativos creados</div><div class="cifra">{{ r.alternativos_creados|default:0 }}</div></div>

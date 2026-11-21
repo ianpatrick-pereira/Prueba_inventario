@@ -18,12 +18,12 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 from django.db.models.functions import Lower
 from django.utils import timezone
 
 from . import servicios
-from .models import Categoria, CodigoAlternativo, Documento, ImportacionEleventa, Producto
+from .models import Categoria, CodigoAlternativo, Documento, ImportacionEleventa, Movimiento, Producto
 from .validadores import clave_nombre, codigo_desde_descripcion, normalizar_codigo
 
 # ----------------------------------------------------------------------------- mapeo de columnas
@@ -376,6 +376,12 @@ class Fila:
         return not self.errores
 
     @property
+    def error_de_codigo(self):
+        """T1: el error esta en el CODIGO mismo (comillas, simbolo inicial, valor logico, largo, vacio). Un codigo
+        repetido en el archivo no cuenta: el codigo en si es valido."""
+        return any(e.startswith("Código") and not e.startswith("Código duplicado") for e in self.errores)
+
+    @property
     def motivo_revision(self):
         """Texto que queda en el producto creado para revision (los mensajes de error de la fila)."""
         return f"Fila {self.numero} del archivo: " + " ".join(self.errores)
@@ -704,17 +710,21 @@ def _en_lotes(valores, n=500):
 
 
 def clasificar(filas):
-    """Marca cada fila como nueva/existente/revision/error consultando la base (stock actual de las existentes).
+    """Marca cada fila como nueva/existente/completar/archivado/revision/error consultando la base.
 
-    D-63: una fila con error ya no se descarta si tiene un codigo usable (no vacio, hasta 50 caracteres) que no
-    existe en la base: estado «revision» (se crea marcada, sin stock ni precios). En un codigo repetido dentro del
-    archivo solo la primera fila se crea; las demas se listan como error. Un codigo que ya existe no se toca."""
+    D-63/T1: una fila con error en columnas que NO son el codigo y con codigo valido (que no existe en la base) no
+    se descarta: estado «revision» (se crea marcada, sin stock ni precios). Si el error esta en el codigo mismo,
+    o ya existe, queda como error con una nota. En un codigo repetido en el archivo solo la primera fila se crea.
+    D-65: una fila valida cuyo producto existe y esta (a) marcado para revision y SIN movimientos → «completar»;
+    con movimientos → «existente» (conserva la marca); (b) archivado → «archivado» (no se modifica)."""
     skus = [f.codigo for f in filas if f.codigo and f.valida]
     existentes = {}
     for lote in _en_lotes(skus):
-        for p in servicios.productos_con_stock(Producto.objects.filter(sku__in=lote)):
+        consulta = servicios.productos_con_stock(Producto.objects.filter(sku__in=lote)).annotate(
+            tiene_mov=Exists(Movimiento.objects.filter(producto=OuterRef("pk"))))
+        for p in consulta:
             existentes[p.sku] = p
-    usables = sorted({f.codigo for f in filas if not f.valida and f.codigo and len(f.codigo) <= 50})
+    usables = sorted({f.codigo for f in filas if not f.valida and not f.error_de_codigo and f.codigo})
     en_bd = set()
     for lote in _en_lotes(usables):
         en_bd.update(Producto.objects.filter(sku__in=lote).values_list("sku", flat=True))
@@ -723,21 +733,34 @@ def clasificar(filas):
         f.estado, f.stock_sistema, f.diferencia, f.revision, f.nota = "nueva", None, None, False, ""
         if not f.valida:
             f.estado = "error"
-            if f.codigo and len(f.codigo) <= 50:
-                if f.codigo in en_bd:
-                    f.nota = "Ese código ya existe en el sistema: no se toca."
-                elif f.codigo in creadas_para_revision:
-                    f.nota = (f"Código repetido: el producto se crea una sola vez, desde la fila "
-                              f"{creadas_para_revision[f.codigo]}.")
-                else:
-                    creadas_para_revision[f.codigo] = f.numero
-                    f.estado, f.revision = "revision", True
+            if f.error_de_codigo:
+                f.nota = "El código no es válido; corrígelo en Eleventa."
+            elif f.codigo in en_bd:
+                f.nota = "Ese código ya existe en el sistema: no se toca."
+            elif f.codigo in creadas_para_revision:
+                f.nota = (f"Código repetido: el producto se crea una sola vez, desde la fila "
+                          f"{creadas_para_revision[f.codigo]}.")
+            else:
+                creadas_para_revision[f.codigo] = f.numero
+                f.estado, f.revision = "revision", True
             continue
         p = existentes.get(f.codigo)
         if p is None:
             continue
-        f.estado = "existente"
         f.stock_sistema = Decimal(p.stock).quantize(CENTAVO)
+        if not p.activo:
+            f.estado, f.stock_sistema = "archivado", None
+            f.nota = "Archivado: no se modifica."
+            continue
+        f.estado = "existente"
+        if p.requiere_revision:
+            if not p.tiene_mov and not f.mala_lectura:
+                f.estado = "completar"
+                f.nota = ("Estaba en revisión y sin movimientos: se completa con los datos de la fila y su stock "
+                          "como inventario inicial.")
+                continue
+            f.nota = ("Está marcado para revisión y " + ("tiene posible mala lectura de tildes" if not p.tiene_mov
+                      else "ya tiene movimientos") + ": no cambia su stock y conserva la marca.")
         if f.inventario is not None:
             f.diferencia = f.inventario - f.stock_sistema
     _resolver_alternativos(filas)
@@ -768,7 +791,7 @@ def _resolver_alternativos(filas):
     for f in filas:
         f.alt_crear = ""
         f.advertencias[:] = [a for a in f.advertencias if not a.startswith(_PREFIJO_AVISO_ALT)]
-        if not (f.valida and f.codigo_alt) or f.mala_lectura:
+        if not (f.valida and f.codigo_alt) or f.mala_lectura or f.estado == "archivado":
             continue
         x = f.codigo_alt
         k = x.casefold()
@@ -788,10 +811,12 @@ def _resolver_alternativos(filas):
 
 
 def resumir(filas):
-    nuevas = [f for f in filas if f.estado == "nueva"]
+    nuevas = [f for f in filas if f.estado in ("nueva", "completar")]      # cargan inventario inicial
     r = {
         "filas": len(filas),
-        "nuevas": len(nuevas),
+        "nuevas": sum(f.estado == "nueva" for f in filas),
+        "por_completar": sum(f.estado == "completar" for f in filas),
+        "archivados": sum(f.estado == "archivado" for f in filas),
         "existentes": sum(f.estado == "existente" for f in filas),
         "con_advertencia": sum(bool(f.advertencias) and f.valida for f in filas),
         "con_error": sum(f.estado == "error" for f in filas),
@@ -910,10 +935,11 @@ def _aplicar(importacion_id, usuario, filas, actualizar_existentes):
         nuevas = [f for f in filas if f.estado == "nueva"]
         existentes = [f for f in filas if f.estado == "existente"]
         revisiones = [f for f in filas if f.estado == "revision"]            # D-63
+        completar = [f for f in filas if f.estado == "completar"]            # D-65 (a)
         # categorias (comparadas sin mayusculas ni espacios)
         categorias = {clave_nombre(c.nombre): c for c in Categoria.objects.all()}
         faltan = {}
-        for f in nuevas:
+        for f in nuevas + completar:
             if f.departamento:
                 faltan.setdefault(clave_nombre(f.departamento), f.departamento)
         faltan = {k: v for k, v in faltan.items() if k not in categorias}
@@ -940,6 +966,25 @@ def _aplicar(importacion_id, usuario, filas, actualizar_existentes):
             productos.append(p)
         nuevas = nuevas + revisiones                                          # mismo orden que `productos`
         Producto.objects.bulk_create(productos, batch_size=500)
+        # D-65 (a): productos en revision sin movimientos que llegan como fila valida: se COMPLETAN (con o sin
+        # «actualizar existentes»), pierden la marca y reciben su stock como inventario inicial.
+        por_sku_completar = {}
+        for lote in _en_lotes([f.codigo for f in completar]):
+            por_sku_completar.update({p.sku: p for p in Producto.objects.select_for_update().filter(sku__in=lote)})
+        hoy = timezone.localdate()
+        completados = []
+        for f in completar:
+            p = por_sku_completar[f.codigo]
+            p.nombre, p.costo, p.precio_venta, p.precio_mayoreo = f.descripcion, f.costo, f.precio_venta, f.precio_mayoreo
+            p.stock_min = p.stock_max = f.minimo
+            p.categoria = categorias[clave_nombre(f.departamento)] if f.departamento else None
+            p.requiere_revision = False
+            p.motivo_revision = f"Completado por la carga del {hoy:%d-%m-%Y}"
+            p.full_clean(exclude=["categoria"], validate_unique=False, validate_constraints=False)
+            completados.append(p)
+        Producto.objects.bulk_update(
+            completados, ["nombre", "costo", "precio_venta", "precio_mayoreo", "stock_min", "stock_max",
+                          "categoria", "requiere_revision", "motivo_revision"], batch_size=500)
         # existentes: nunca se toca el stock; los datos solo si el usuario lo pidio
         actualizados = 0
         diferencias = [
@@ -972,6 +1017,8 @@ def _aplicar(importacion_id, usuario, filas, actualizar_existentes):
         # D-62: codigo de la descripcion como codigo alternativo (nunca se borra ninguno)
         alternativos = [CodigoAlternativo(producto=p, tipo="fabricante", valor=f.alt_crear)
                         for p, f in zip(productos, nuevas) if f.alt_crear and not f.mala_lectura]
+        alternativos += [CodigoAlternativo(producto=por_sku_completar[f.codigo], tipo="fabricante", valor=f.alt_crear)
+                         for f in completar if f.alt_crear]
         if actualizar_existentes and existentes:
             alternativos += [CodigoAlternativo(producto=por_sku[f.codigo], tipo="fabricante", valor=f.alt_crear)
                              for f in existentes if f.alt_crear]
@@ -980,6 +1027,8 @@ def _aplicar(importacion_id, usuario, filas, actualizar_existentes):
         # inventario inicial (solo productos nuevos con inventario > 0)
         con_stock = [(p, f.inventario) for p, f in zip(productos, nuevas)
                      if not f.revision and f.inventario is not None and f.inventario > 0]
+        con_stock += [(por_sku_completar[f.codigo], f.inventario) for f in completar
+                      if f.inventario is not None and f.inventario > 0]
         documento = None
         if con_stock:
             documento = Documento.objects.create(
@@ -994,7 +1043,7 @@ def _aplicar(importacion_id, usuario, filas, actualizar_existentes):
         resumen.update({
             "pasaron_a_existentes": pasaron,
             "alternativos_creados": len(alternativos),
-            "creados": len(productos), "creados_para_revision": len(revisiones), "actualizados": actualizados, "productos_con_stock": len(con_stock),
+            "creados": len(productos), "creados_para_revision": len(revisiones), "completados": len(completados), "actualizados": actualizados, "productos_con_stock": len(con_stock),
             "unidades_cargadas": str(sum((c for _, c in con_stock), Decimal("0"))),
             "diferencias": diferencias,
             "no_actualizados_mala_lectura": no_actualizados if actualizar_existentes else [],

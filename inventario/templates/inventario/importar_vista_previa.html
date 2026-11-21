@@ -16,6 +16,8 @@
     <div class="tarjeta"><div class="etiqueta-cifra">Productos nuevos</div><div class="cifra">{{ resumen.nuevas }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Productos que ya existen</div><div class="cifra">{{ resumen.existentes }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Se crearán para revisión</div><div class="cifra{% if resumen.para_revision %} alerta{% endif %}">{{ resumen.para_revision }}</div><div class="ayuda">Sin precios ni stock, marcados «Requiere modificación urgente»</div></div>
+    <div class="tarjeta"><div class="etiqueta-cifra">Se completarán (estaban en revisión)</div><div class="cifra">{{ resumen.por_completar }}</div><div class="ayuda">Productos marcados y sin movimientos que llegan con datos válidos</div></div>
+    {% if resumen.archivados %}<div class="tarjeta"><div class="etiqueta-cifra">Archivados (no se modifican)</div><div class="cifra">{{ resumen.archivados }}</div></div>{% endif %}
     <div class="tarjeta"><div class="etiqueta-cifra">Filas con advertencia</div><div class="cifra">{{ resumen.con_advertencia }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Filas con error (no se crean)</div><div class="cifra{% if resumen.con_error %} alerta{% endif %}">{{ resumen.con_error }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Unidades totales a cargar</div><div class="cifra">{{ resumen.unidades|cantidad }}</div></div>
@@ -45,7 +47,7 @@
         <td class="num">{{ f.costo|pesos }}</td>
         <td class="num">{{ f.precio_venta|pesos }}</td>
         <td class="mono">{% if f.alt_crear %}{{ f.alt_crear }} <span class="ayuda">(alternativo)</span>{% else %}-{% endif %}</td>
-        <td>{% if f.estado == "nueva" %}<span class="insignia insignia-nueva">Nueva</span>{% elif f.estado == "existente" %}<span class="insignia insignia-existente">Existente</span>{% elif f.estado == "revision" %}<span class="insignia insignia-urgente">Se creará para revisión</span>{% else %}<span class="insignia insignia-error">Error</span>{% endif %}
+        <td>{% if f.estado == "nueva" %}<span class="insignia insignia-nueva">Nueva</span>{% elif f.estado == "existente" %}<span class="insignia insignia-existente">Existente</span>{% elif f.estado == "revision" %}<span class="insignia insignia-urgente">Se creará para revisión</span>{% elif f.estado == "completar" %}<span class="insignia insignia-nueva">Se completará (estaba en revisión)</span>{% elif f.estado == "archivado" %}<span class="insignia insignia-archivado">Archivado: no se modifica</span>{% else %}<span class="insignia insignia-error">Error</span>{% endif %}
             {% if f.advertencias and f.estado != "error" %}<span class="insignia insignia-aviso">advertencia</span>{% endif %}</td>
         <td>
           {% for m in f.errores %}<div class="error">{{ m }}</div>{% endfor %}

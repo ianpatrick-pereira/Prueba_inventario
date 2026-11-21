@@ -49,15 +49,13 @@ def test_cada_tipo_de_fila_con_error_se_crea_marcada_sin_stock_ni_precios(adm):
     contenido = texto(
         "0077\tMANGUERA\t1/2 REFORZADA\t1.234,50\t2.500,00\t2.000,00\t10\t2\tFiltros",     # columnas corridas
         "T1\tTexto en precio\tabc\t2.000,00\t1.500,00\t3\t1\tAceites",                        # texto en un numero
-        '"Q1"\tEntre comillas\t1.000,00\t2.000,00\t1.500,00\t3\t1\tAceites',                  # codigo entre comillas
-        "-S1\tSimbolo inicial\t1.000,00\t2.000,00\t1.500,00\t3\t1\tAceites",                  # simbolo inicial
         "DUP\tUno\t1.000,00\t2.000,00\t1.500,00\t3\t1\tAceites",
         "DUP\tDos\t1.000,00\t2.000,00\t1.500,00\t3\t1\tAceites",                              # repetido
         "OK1\tNormal\t1.000,00\t2.000,00\t1.500,00\t3\t1\tAceites",
     )
     cargar(adm, contenido, "inventario.xls")
     marcados = {p.sku: p for p in Producto.objects.filter(requiere_revision=True)}
-    assert set(marcados) == {"0077", "T1", '"Q1"', "-S1", "DUP"}
+    assert set(marcados) == {"0077", "T1", "DUP"}
     for p in marcados.values():
         assert p.costo == p.precio_venta == p.precio_mayoreo == 0 and p.categoria is None
         assert servicios.stock_de(p) == 0 and not Movimiento.objects.filter(producto=p).exists()
@@ -65,8 +63,6 @@ def test_cada_tipo_de_fila_con_error_se_crea_marcada_sin_stock_ni_precios(adm):
     assert marcados["0077"].nombre == "0077"                       # descripcion no confiable por corrimiento: el codigo
     assert "La fila tiene 9 columnas" in marcados["0077"].motivo_revision
     assert marcados["T1"].nombre == "Texto en precio" and "texto no numérico" in marcados["T1"].motivo_revision
-    assert "Código entre comillas" in marcados['"Q1"'].motivo_revision
-    assert "símbolo inicial" in marcados["-S1"].motivo_revision
     assert marcados["DUP"].nombre == "Uno" and "duplicado" in marcados["DUP"].motivo_revision
     ok = Producto.objects.get(sku="OK1")                              # las filas validas se importan como hoy
     assert not ok.requiere_revision and ok.costo == 1000 and servicios.stock_de(ok) == 3
@@ -385,3 +381,141 @@ def test_permiso_archivar_solo_para_el_administrador_y_la_migracion_es_idempoten
 def test_el_hash_de_la_importacion_ya_no_es_unico_pero_tiene_indice():
     campo = ImportacionEleventa._meta.get_field("hash_sha256")
     assert not campo.unique and campo.db_index
+
+
+# ================================================================== T1: error en el CODIGO -> no se crea
+@pytest.mark.parametrize("codigo", ['"0077"', "=1+2", "-123", "+5", "@x", "A" * 51])
+def test_t1_fila_con_el_error_en_el_codigo_no_se_crea_para_revision(adm, codigo):
+    contenido = texto(f"{codigo}\tDescripcion\t1.000\t2.000\t1.500\t3\t1\tAceites", "OK1\tNormal\t1\t2\t3\t4\t0\tD")
+    i = preparar(adm, contenido, "inventario.xls")
+    r = adm.get(reverse("importar_vista_previa", args=[i.pk]))
+    mala = next(f for f in r.context["pagina"] if f.codigo == codigo)
+    assert mala.estado == "error" and "El código no es válido; corrígelo en Eleventa." in mala.nota
+    assert r.context["resumen"]["con_error"] == 1 and r.context["resumen"]["para_revision"] == 0
+    confirmar_http(adm, i)
+    assert list(Producto.objects.values_list("sku", flat=True)) == ["OK1"]
+
+
+def test_t1_valor_logico_de_xlsx_y_codigo_vacio_no_se_crean(adm):
+    i = preparar(adm, xlsx([[True, "Booleano", 1, 1, 1, 1, 0, ""], ["", "Vacio", 1, 1, 1, 1, 0, ""], fila("OK1")]))
+    r = adm.get(reverse("importar_vista_previa", args=[i.pk]))
+    assert r.context["resumen"]["con_error"] == 2 and r.context["resumen"]["para_revision"] == 0
+    confirmar_http(adm, i)
+    assert list(Producto.objects.values_list("sku", flat=True)) == ["OK1"]
+
+
+def test_t1_codigo_valido_con_error_en_otra_columna_si_se_crea_para_revision(adm):
+    i = preparar(adm, xlsx([fila("OK9", "Texto", inv="abc")]))
+    confirmar_http(adm, i)
+    assert Producto.objects.get(sku="OK9").requiere_revision
+
+
+# ================================================================== T2: el admin no borra productos
+def test_t2_ni_el_superusuario_borra_productos_desde_el_admin(client, django_user_model):
+    from django.contrib import admin as dj_admin
+    from django.test import RequestFactory
+    su = django_user_model.objects.create_superuser("root", password="Zq7-mPx2vL-prueba")
+    p = Producto.objects.create(sku="AD1", nombre="x")
+    client.force_login(su)
+    modelo = dj_admin.site._registry[Producto]
+    peticion = RequestFactory().get("/")
+    peticion.user = su
+    assert modelo.has_delete_permission(peticion) is False and modelo.has_delete_permission(peticion, p) is False
+    assert client.get(reverse("admin:inventario_producto_delete", args=[p.pk])).status_code == 403
+    assert client.post(reverse("admin:inventario_producto_delete", args=[p.pk]), {"post": "yes"}).status_code == 403
+    r = client.post(reverse("admin:inventario_producto_changelist"),
+                    {"action": "delete_selected", "_selected_action": [p.pk], "post": "yes"})
+    assert Producto.objects.filter(pk=p.pk).exists()
+    assert "delete_selected" not in [a[0] for a in modelo.get_actions(peticion).values()] and r.status_code in (200, 302)
+    assert "delete_selected" not in modelo.get_actions(peticion)
+
+
+def test_t2_el_admin_filtra_por_activo_y_revision(client, django_user_model):
+    su = django_user_model.objects.create_superuser("root", password="Zq7-mPx2vL-prueba")
+    client.force_login(su)
+    Producto.objects.create(sku="AR1", nombre="x", requiere_revision=True)
+    Producto.objects.create(sku="AR2", nombre="y", activo=False)
+    url = reverse("admin:inventario_producto_changelist")
+    assert [p.sku for p in client.get(url, {"requiere_revision__exact": "1"}).context["cl"].result_list] == ["AR1"]
+    assert [p.sku for p in client.get(url, {"activo__exact": "0"}).context["cl"].result_list] == ["AR2"]
+
+
+# ================================================================== T3: el lote rechaza archivados
+def test_t3_inventario_inicial_en_lote_rechaza_productos_archivados(admin_user):
+    from inventario.models import Documento
+    p = Producto.objects.create(sku="L1", nombre="x", activo=False)
+    q = Producto.objects.create(sku="L2", nombre="y")
+    doc = Documento.objects.create(tipo=Documento.INVENTARIO_INICIAL, nombre="t")
+    with pytest.raises(ValidationError) as e:
+        servicios.registrar_inventario_inicial_en_lote([(q, D("1")), (p, D("2"))], admin_user, doc)
+    assert "archivado" in e.value.messages[0] and not Movimiento.objects.exists()
+
+
+# ================================================================== T4: D-65
+def marcado(sku="REV1", con_movimiento=False, usuario=None, **kw):
+    p = Producto.objects.create(sku=sku, nombre=sku, requiere_revision=True, motivo_revision="Fila 3: texto", **kw)
+    if con_movimiento:
+        servicios.registrar_ajuste(p, D("4"), usuario, "Conteo a mano")
+    return p
+
+
+@pytest.mark.parametrize("actualizar", [False, True])
+def test_t4a_marcado_sin_movimientos_se_completa_con_fila_valida(adm, admin_user, actualizar):
+    p = marcado("REV1")
+    i = preparar(adm, xlsx([["REV1", "ABC123", 1500, 2990, 2500, 7, 2, "Filtros"], fila("N1")]))
+    r = adm.get(reverse("importar_vista_previa", args=[i.pk]))
+    f = next(x for x in r.context["pagina"] if x.codigo == "REV1")
+    assert f.estado == "completar" and r.context["resumen"]["por_completar"] == 1
+    html = r.content.decode()
+    assert "Se completará (estaba en revisión)" in html and "Se completarán (estaban en revisión)" in html
+    confirmar_http(adm, i, actualizar)
+    p.refresh_from_db()
+    assert not p.requiere_revision and p.motivo_revision.startswith("Completado por la carga del ")
+    assert p.nombre == "ABC123" and p.costo == 1500 and p.precio_venta == 2990 and p.precio_mayoreo == 2500
+    assert p.stock_min == 2 and p.categoria.nombre == "Filtros"
+    assert servicios.stock_de(p) == 7
+    m = Movimiento.objects.get(producto=p)
+    assert m.motivo == imp.MOTIVO_INICIAL and m.documento.tipo == "inventario_inicial"
+    assert [(a.valor, a.tipo) for a in p.codigoalternativo_set.all()] == [("ABC123", "fabricante")]
+    assert ImportacionEleventa.objects.get().resumen["completados"] == 1
+
+
+@pytest.mark.parametrize("actualizar", [False, True])
+def test_t4a_marcado_con_movimientos_se_trata_como_existente_y_conserva_la_marca(adm, admin_user, actualizar):
+    p = marcado("REV2", con_movimiento=True, usuario=admin_user)
+    i = preparar(adm, xlsx([["REV2", "Nombre nuevo", 1500, 2990, 2500, 99, 2, "Filtros"]]))
+    r = adm.get(reverse("importar_vista_previa", args=[i.pk]))
+    f = r.context["pagina"][0]
+    assert f.estado == "existente" and "ya tiene movimientos" in f.nota and r.context["resumen"]["por_completar"] == 0
+    confirmar_http(adm, i, actualizar)
+    p.refresh_from_db()
+    assert p.requiere_revision and p.motivo_revision == "Fila 3: texto"          # conserva la marca y el motivo
+    assert servicios.stock_de(p) == 4 and Movimiento.objects.filter(producto=p).count() == 1
+    assert (p.nombre == "Nombre nuevo") == actualizar                              # solo si se pidio actualizar
+
+
+def test_t4a_la_carga_posterior_completa_al_que_se_creo_para_revision(adm):
+    cargar(adm, xlsx([fila("MAL", "Texto", inv="abc")]), "primero.xlsx")
+    assert Producto.objects.get(sku="MAL").requiere_revision
+    cargar(adm, xlsx([["MAL", "Corregido", 100, 200, 150, 6, 1, "Dep"]]), "segundo.xlsx")
+    p = Producto.objects.get(sku="MAL")
+    assert not p.requiere_revision and p.nombre == "Corregido" and servicios.stock_de(p) == 6
+
+
+@pytest.mark.parametrize("actualizar", [False, True])
+def test_t4b_un_archivado_nunca_se_actualiza_ni_completa(adm, admin_user, actualizar):
+    a = Producto.objects.create(sku="ARC1", nombre="Original", activo=False, costo=D("5"))
+    b = Producto.objects.create(sku="ARC2", nombre="Original2", activo=False, requiere_revision=True,
+                                motivo_revision="x")
+    i = preparar(adm, xlsx([["ARC1", "ABC123", 1500, 2990, 2500, 7, 2, "Filtros"],
+                            ["ARC2", "ABC124", 1500, 2990, 2500, 7, 2, "Filtros"]]))
+    r = adm.get(reverse("importar_vista_previa", args=[i.pk]))
+    assert {f.estado for f in r.context["pagina"]} == {"archivado"} and r.context["resumen"]["archivados"] == 2
+    assert "Archivado: no se modifica" in r.content.decode()
+    confirmar_http(adm, i, actualizar)
+    for p in (a, b):
+        p.refresh_from_db()
+        assert not p.activo and p.nombre.startswith("Original") and servicios.stock_de(p) == 0
+        assert p.codigoalternativo_set.count() == 0
+    b.refresh_from_db()
+    assert b.requiere_revision and b.motivo_revision == "x" and not Movimiento.objects.exists()
