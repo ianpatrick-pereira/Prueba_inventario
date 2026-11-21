@@ -65,6 +65,13 @@ class ProductoLista(Permiso, ListView):
     def get_paginate_by(self, queryset):
         return 500 if self._bajo_minimo() else self.paginate_by     # la hoja impresa va en una sola lista
 
+    def _revision(self):
+        return self.request.GET.get("revision") == "1"
+
+    def _archivados(self):
+        """D-64: solo quien puede archivar ve los archivados (?archivados=1)."""
+        return self.request.GET.get("archivados") == "1" and self.request.user.has_perm("inventario.archivar_producto")
+
     def _filtro_categoria(self):
         """Lee ?categoria=<pk>|ninguna. Un valor invalido o inexistente no da error: avisa y no filtra."""
         if hasattr(self, "_cat"):
@@ -85,6 +92,9 @@ class ProductoLista(Permiso, ListView):
     def get_queryset(self):
         q = normalizar_codigo(self.request.GET.get("q"))
         qs = servicios.productos_con_stock(Producto.objects.select_related("categoria"))
+        qs = qs.filter(activo=not self._archivados())        # D-64: los archivados no aparecen en lista ni busqueda
+        if self._revision():
+            qs = qs.filter(requiere_revision=True)
         cat = self._filtro_categoria()
         if cat == "ninguna":
             qs = qs.filter(categoria__isnull=True)
@@ -115,7 +125,9 @@ class ProductoLista(Permiso, ListView):
         q = normalizar_codigo(self.request.GET.get("q"))
         cat = self._filtro_categoria()
         bajo = self._bajo_minimo()
-        base = {k: v for k, v in (("q", q), ("bajo_minimo", "1" if bajo else "")) if v}
+        revision, archivados = self._revision(), self._archivados()
+        base = {k: v for k, v in (("q", q), ("bajo_minimo", "1" if bajo else ""),
+                                  ("revision", "1" if revision else ""), ("archivados", "1" if archivados else "")) if v}
 
         def enlace(**extra):
             datos = {**base, **extra}
@@ -124,14 +136,32 @@ class ProductoLista(Permiso, ListView):
         chips = [{"texto": "Todas", "href": enlace(), "activo": cat is None},
                  {"texto": "Sin categoría", "href": enlace(categoria="ninguna"), "activo": cat == "ninguna"}]
         chips += [{"texto": c.nombre, "href": enlace(categoria=c.pk), "activo": cat == c.pk} for c in self.categorias]
+        # D-63/D-64: filtros aparte de las categorias (se combinan con ellas y con la busqueda)
+        sin = {k: v for k, v in base.items() if k not in ("revision", "archivados")}
+
+        def enlace_extra(**extra):
+            datos = {**sin, **extra}
+            if cat is not None:
+                datos["categoria"] = cat
+            return "?" + urlencode(datos) if datos else reverse("producto_lista")
+
+        n_revision = Producto.objects.filter(activo=True, requiere_revision=True).count()
+        chips_estado = [{"texto": f"⚠ Requiere revisión ({n_revision})", "activo": revision, "revision": True,
+                         "href": enlace_extra() if revision else enlace_extra(revision="1")}]
+        if self.request.user.has_perm("inventario.archivar_producto"):
+            chips_estado.append({"texto": "Archivados", "activo": archivados,
+                                 "href": enlace_extra() if archivados else enlace_extra(archivados="1")})
         ctx.update({
+            "chips_estado": chips_estado, "revision": revision, "archivados": archivados, "n_revision": n_revision,
             "q": q, "categorias": self.categorias, "categoria_sel": "ninguna" if cat == "ninguna" else (cat or ""),
             "aviso_categoria": self.aviso_categoria, "chips": chips, "bajo_minimo": bajo,
             "categoria_param": "" if cat is None else cat,
             # los enlaces de pagina conservan la busqueda y la categoria
             "volver_param": urlencode({"volver": self.request.GET.urlencode()}) if self.request.GET else "",
             "filtros_qs": urlencode({k: v for k, v in (("q", q), ("categoria", "" if cat is None else cat),
-                                                       ("bajo_minimo", "1" if bajo else "")) if v != ""}),
+                                                       ("bajo_minimo", "1" if bajo else ""),
+                                                       ("revision", "1" if revision else ""),
+                                                       ("archivados", "1" if archivados else "")) if v != ""}),
         })
         return ctx
 
@@ -158,6 +188,57 @@ class ProductoEditar(Permiso, MensajeExito, UpdateView):
 
     def get_success_url(self):
         return reverse("producto_detalle", args=[self.object.pk])
+
+
+class MarcarRevisado(Permiso, View):
+    """POST: quita la marca «requiere revision» (D-63). Quien puede editar productos puede revisarlos."""
+
+    permission_required = "inventario.change_producto"
+
+    def post(self, request, pk):
+        producto = get_object_or_404(Producto, pk=pk)
+        Producto.objects.filter(pk=pk).update(requiere_revision=False, motivo_revision="")
+        messages.success(request, f"Producto {producto.sku} marcado como revisado.")
+        return redirect("producto_detalle", pk=pk)
+
+
+class ProductoArchivar(Permiso, View):
+    """D-64: no se borra ningun producto. Archivar lo saca de la lista, la busqueda, el panel y la impresion y
+    conserva su kardex. GET muestra la confirmacion (con token, D-45); POST archiva."""
+
+    permission_required = "inventario.archivar_producto"
+    template_name = "inventario/producto_archivar.html"
+
+    def get(self, request, pk):
+        producto = get_object_or_404(Producto, pk=pk)
+        if not producto.activo:
+            messages.info(request, "Ese producto ya está archivado.")
+            return redirect("producto_detalle", pk=pk)
+        return render(request, self.template_name, {
+            "producto": producto, "stock": servicios.stock_de(producto),
+            "n_movimientos": Movimiento.objects.filter(producto=producto).count(),
+            "token": tokens.emitir(request, f"archivar:{pk}"),
+        })
+
+    def post(self, request, pk):
+        producto = get_object_or_404(Producto, pk=pk)
+        if not tokens.consumir(request, request.POST.get("token", ""), f"archivar:{pk}"):
+            messages.warning(request, "Este formulario ya se había enviado (o venció): no se cambió nada nuevo. "
+                                      "Revisa el estado del producto.")
+            return redirect("producto_detalle", pk=pk)
+        Producto.objects.filter(pk=pk).update(activo=False)
+        messages.success(request, f"Producto {producto.sku} archivado: ya no aparece en la lista, pero conserva su kardex.")
+        return redirect("producto_detalle", pk=pk)
+
+
+class ProductoReactivar(Permiso, View):
+    permission_required = "inventario.archivar_producto"
+
+    def post(self, request, pk):
+        producto = get_object_or_404(Producto, pk=pk)
+        Producto.objects.filter(pk=pk).update(activo=True)
+        messages.success(request, f"Producto {producto.sku} reactivado.")
+        return redirect("producto_detalle", pk=pk)
 
 
 def _volver_a_la_lista(request):
@@ -325,7 +406,8 @@ class CategoriaLista(Permiso, ListView):
     permission_required = "inventario.view_categoria"
     template_name = "inventario/categoria_lista.html"
     context_object_name = "categorias"
-    queryset = Categoria.objects.annotate(n_productos=Count("producto")).order_by("nombre")
+    queryset = Categoria.objects.annotate(
+        n_productos=Count("producto", filter=Q(producto__activo=True))).order_by("nombre")
 
 
 class CategoriaNueva(Permiso, MensajeExito, CreateView):
@@ -606,28 +688,25 @@ class ImportarSubir(_ImportarBase, View):
             return render(request, self.template_name, {"form": form})
         contenido = form.contenido
         huella = importar_eleventa.sha256(contenido)
-        previa = ImportacionEleventa.objects.filter(hash_sha256=huella).first()
-        if previa and previa.estado == ImportacionEleventa.CONFIRMADA:
-            form.add_error("archivo", f"Este archivo ya fue importado el {timezone.localtime(previa.fecha):%d-%m-%Y %H:%M}.")
-            return render(request, self.template_name, {"form": form})
-        if previa and previa.estado == ImportacionEleventa.VISTA_PREVIA:
+        previa = (ImportacionEleventa.objects.filter(hash_sha256=huella, estado=ImportacionEleventa.VISTA_PREVIA)
+                  .order_by("-pk").first())
+        if previa:
+            try:
+                importar_eleventa.asegurar_analisis_vigente(previa)      # reglas nuevas: se vuelve a analizar
+            except importar_eleventa.ArchivoInvalido as e:
+                form.add_error("archivo", e.messages)
+                return render(request, self.template_name, {"form": form})
             messages.info(request, "Este archivo ya estaba subido: continúa desde su vista previa.")
             return redirect("importar_vista_previa", pk=previa.pk)
-        if previa:  # descartada: se reemplaza por una nueva vista previa
-            previa.archivo.delete(save=False)
-            previa.delete()
+        # D-63: se puede subir de nuevo un archivo ya cargado (el hash solo se conserva como dato): al confirmar
+        # solo se crean los productos que faltan y los existentes no cambian de stock.
         nombre = (request.FILES["archivo"].name or "archivo").replace("\\", "/").rsplit("/", 1)[-1][:255]
         imp = ImportacionEleventa(usuario=request.user, hash_sha256=huella, nombre_original=nombre,
                                   analisis=form.analisis.a_json())
         # Se guarda con nombre aleatorio y la extension del FORMATO detectado (no la del nombre original).
         imp.archivo.save("importacion.csv" if form.formato == "texto" else "importacion.xlsx",
                          ContentFile(contenido), save=False)
-        try:
-            imp.save()
-        except IntegrityError:
-            imp.archivo.delete(save=False)
-            form.add_error("archivo", "Este archivo ya fue subido por otra persona; reintenta.")
-            return render(request, self.template_name, {"form": form})
+        imp.save()
         return redirect("importar_vista_previa", pk=imp.pk)
 
 
@@ -655,8 +734,10 @@ class ImportarVistaPrevia(_ImportarBase, View):
             imp.analisis["existentes_vistos"] = vistos
             imp.save(update_fields=["analisis"])
         pagina = _Paginator(filas, 100).get_page(request.GET.get("page"))
+        ya_cargado = (ImportacionEleventa.objects.filter(hash_sha256=imp.hash_sha256, estado=ImportacionEleventa.CONFIRMADA)
+                      .exclude(pk=imp.pk).order_by("-fecha").first())
         return render(request, self.template_name, {
-            "imp": imp, "resumen": importar_eleventa.resumir(filas), "pagina": pagina,
+            "imp": imp, "ya_cargado": ya_cargado, "resumen": importar_eleventa.resumir(filas), "pagina": pagina,
             "omitidas": filas.omitidas, "codificacion": filas.codificacion, "avisos": filas.avisos,
             "token": tokens.emitir(request, f"importar:{pk}"),
         })

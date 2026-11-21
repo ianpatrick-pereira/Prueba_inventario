@@ -13,6 +13,7 @@ from openpyxl import Workbook
 
 from inventario import importar_eleventa as imp
 from inventario import servicios
+from inventario import servicios
 from inventario.models import ImportacionEleventa, Producto
 
 pytestmark = pytest.mark.django_db
@@ -321,8 +322,11 @@ def test_tab_dentro_de_la_descripcion_es_error_y_no_carga_el_precio_como_inventa
     url = reverse("importar_vista_previa", args=[i.pk])
     token = re.search(r'name="token" value="([^"]+)"', adm.get(url).content.decode()).group(1)
     adm.post(url, {"token": token, "accion": "confirmar"})
-    assert list(Producto.objects.values_list("sku", flat=True)) == ["B1"]                    # la fila corrida NO se cargo
-    assert not Producto.objects.filter(sku="0077").exists()
+    # D-63: la fila corrida entra SOLO con codigo (nombre = codigo, sin datos corridos), sin precios ni stock
+    assert sorted(Producto.objects.values_list("sku", flat=True)) == ["0077", "B1"]
+    corrida = Producto.objects.get(sku="0077")
+    assert corrida.requiere_revision and corrida.nombre == "0077" and corrida.costo == 0 and corrida.precio_venta == 0
+    assert "La fila tiene 9 columnas" in corrida.motivo_revision and servicios.stock_de(corrida) == 0
 
 
 def test_punto_y_coma_sin_comillas_dentro_de_la_descripcion_en_csv_es_error():
@@ -488,8 +492,9 @@ def test_tab_en_la_descripcion_con_departamento_vacio_es_error_aunque_la_celda_e
     url = reverse("importar_vista_previa", args=[i.pk])
     token = re.search(r'name="token" value="([^"]+)"', adm.get(url).content.decode()).group(1)
     adm.post(url, {"token": token, "accion": "confirmar"})
-    assert sorted(Producto.objects.values_list("sku", flat=True)) == ["B1", "C2"]        # el precio mayoreo NO terminó como inventario
-    assert not Producto.objects.filter(sku="0077").exists()
+    assert sorted(Producto.objects.values_list("sku", flat=True)) == ["0077", "B1", "C2"]
+    corrida = Producto.objects.get(sku="0077")                # D-63: marcada, sin stock (el mayoreo NO terminó como inventario)
+    assert corrida.requiere_revision and servicios.stock_de(corrida) == 0 and corrida.precio_mayoreo == 0
 
 
 def test_archivo_donde_todas_las_filas_traen_un_tab_final_extra_se_acepta(adm):
@@ -533,7 +538,10 @@ def test_inventario_con_texto_no_numerico_es_error_y_no_se_carga(adm):
     url = reverse("importar_vista_previa", args=[i.pk])
     token = re.search(r'name="token" value="([^"]+)"', adm.get(url).content.decode()).group(1)
     adm.post(url, {"token": token, "accion": "confirmar"})
-    assert list(Producto.objects.values_list("sku", flat=True)) == ["A2"]
+    assert sorted(Producto.objects.values_list("sku", flat=True)) == ["A1", "A2"]
+    a1 = Producto.objects.get(sku="A1")                       # D-63: entra para revision, sin stock ni precios
+    assert a1.requiere_revision and a1.nombre == "X" and servicios.stock_de(a1) == 0 and a1.costo == 0
+    assert not Producto.objects.get(sku="A2").requiere_revision
 
 
 def test_inv_minimo_con_texto_no_numerico_es_error():

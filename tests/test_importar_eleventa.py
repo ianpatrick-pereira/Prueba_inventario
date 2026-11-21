@@ -230,11 +230,11 @@ def test_codigo_con_menos_no_pisa_al_codigo_existente(adm, actualizar):
     p = Producto.objects.create(sku="123", nombre="Original", costo=D("5"))
     i = preparar(adm, xlsx([["-123", "Intento de pisar", 99, 99, 99, 50, 0, "Dep"]]))
     r = adm.get(reverse("importar_vista_previa", args=[i.pk]))
-    assert r.context["resumen"]["con_error"] == 1
+    assert r.context["resumen"]["con_error"] == 1 and r.context["resumen"]["para_revision"] == 0   # T1: error de codigo
     confirmar_http(adm, i, actualizar=actualizar)
     p.refresh_from_db()
     assert p.nombre == "Original" and p.costo == D("5") and Movimiento.objects.count() == 0
-    assert Producto.objects.count() == 1 and not Categoria.objects.exists()
+    assert Producto.objects.count() == 1 and not Categoria.objects.exists()      # «-123» no se crea ni pisa al «123»
     assert ImportacionEleventa.objects.get().resumen["errores"][0]["codigo"] == "-123"
 
 
@@ -342,19 +342,21 @@ def test_vista_previa_conteos_y_mensajes(adm):
     i = preparar(adm, xlsx(filas))
     r = adm.get(reverse("importar_vista_previa", args=[i.pk]))
     res = r.context["resumen"]
-    assert res["filas"] == 9 and res["con_error"] == 5            # 2 duplicadas + codigo vacio + desc vacia + inventario «abc»
+    # D-63: con error (no se crean) = DUP repetida + codigo vacio; para revision = primera DUP, desc vacia, inventario «abc»
+    assert res["filas"] == 9 and res["con_error"] == 2 and res["para_revision"] == 3
     assert res["existentes"] == 1 and res["nuevas"] == 3
     assert res["con_advertencia"] == 2                           # costo 0 e inventario negativo
     assert D(res["unidades"]) == D("8")                          # solo N1 (5) y N2 (3)
     por = {(f.codigo, f.numero): f for f in r.context["pagina"]}
     dup = [f for f in r.context["pagina"] if f.codigo == "DUP"]
-    assert len(dup) == 2 and all(f.estado == "error" and "duplicado" in f.errores[0] for f in dup)
+    assert len(dup) == 2 and all("duplicado" in f.errores[0] for f in dup)
+    assert [f.estado for f in dup] == ["revision", "error"] and "una sola vez" in dup[1].nota
     assert any("Código vacío." in f.errores for f in r.context["pagina"])
     assert any("Descripción vacía." in f.errores for f in r.context["pagina"])
     n2 = next(f for f in r.context["pagina"] if f.codigo == "N2")
     assert any("Costo en 0" in a for a in n2.advertencias)
     n4 = next(f for f in r.context["pagina"] if f.codigo == "N4")                  # texto no numerico: ERROR de fila
-    assert n4.estado == "error" and any("Inventario: texto no numérico" in e for e in n4.errores)
+    assert n4.estado == "revision" and any("Inventario: texto no numérico" in e for e in n4.errores)
     n5 = next(f for f in r.context["pagina"] if f.codigo == "N5")                  # negativo: se importa sin stock, con aviso
     assert n5.inventario is None and any("sin stock" in a for a in n5.advertencias)
     ex = next(f for f in r.context["pagina"] if f.codigo == "A100")
@@ -437,7 +439,11 @@ def test_filas_con_error_no_se_importan_pero_se_listan(adm):
 def test_inventario_negativo_se_importa_sin_stock_y_no_numerico_es_error(adm):
     i = preparar(adm, xlsx([["N1", "Neg", 1, 1, 1, -3, 0, ""], ["N2", "Txt", 1, 1, 1, "x", 0, ""]]))
     confirmar_http(adm, i)
-    assert list(Producto.objects.values_list("sku", flat=True)) == ["N1"] and Movimiento.objects.count() == 0
+    # D-63: N2 (texto en inventario) ya no se descarta: entra marcada para revision, sin stock ni precios
+    assert sorted(Producto.objects.values_list("sku", flat=True)) == ["N1", "N2"] and Movimiento.objects.count() == 0
+    n2 = Producto.objects.get(sku="N2")
+    assert n2.requiere_revision and "Inventario: texto no numérico" in n2.motivo_revision and n2.costo == 0
+    assert not Producto.objects.get(sku="N1").requiere_revision
     assert not Documento.objects.exists()
 
 
@@ -507,24 +513,30 @@ def test_un_error_de_validacion_a_mitad_tampoco_deja_nada(adm, admin_user, monke
 
 
 # ------------------------------------------------------------------ 9. hash y doble envio
-def test_el_mismo_archivo_no_se_confirma_dos_veces(adm):
+def test_el_mismo_archivo_se_puede_cargar_otra_vez_sin_duplicar_stock(adm):
     contenido = xlsx(FILAS)
     i = preparar(adm, contenido)
     confirmar_http(adm, i)
-    r = subir(adm, contenido)
-    assert r.status_code == 200 and "ya fue importado" in r.content.decode()
-    assert ImportacionEleventa.objects.count() == 1
-    # y la confirmacion directa sobre la misma importacion tampoco repite nada
+    assert Producto.objects.count() == 3 and Movimiento.objects.count() == 2
+    r = subir(adm, contenido)                       # D-63: se permite; el hash ya no es unico
+    assert r.status_code == 302
+    j = ImportacionEleventa.objects.order_by("-pk").first()
+    assert j.pk != i.pk and j.hash_sha256 == i.hash_sha256
+    vp = adm.get(reverse("importar_vista_previa", args=[j.pk]))
+    assert "ya se cargó el" in vp.content.decode() and "solo se crearán los productos que falten" in vp.content.decode()
+    assert vp.context["resumen"]["nuevas"] == 0 and vp.context["resumen"]["existentes"] == 3
+    confirmar_http(adm, j)
+    assert Producto.objects.count() == 3 and Movimiento.objects.count() == 2        # nada duplicado
+    # y la confirmacion directa sobre una importacion ya confirmada no repite nada
     with pytest.raises(imp.ImportacionNoValida):
-        imp.confirmar(i.pk, ImportacionEleventa.objects.get().usuario)
+        imp.confirmar(i.pk, i.usuario)
     assert Producto.objects.count() == 3 and Movimiento.objects.count() == 2
 
 
-def test_dos_importaciones_con_el_mismo_hash_son_imposibles_en_la_base(adm, admin_user):
+def test_dos_importaciones_con_el_mismo_hash_son_posibles_en_la_base(adm, admin_user):
     i = preparar(adm)
-    with pytest.raises(IntegrityError), transaction.atomic():
-        ImportacionEleventa.objects.create(archivo="x", hash_sha256=i.hash_sha256, nombre_original="y",
-                                           usuario=admin_user)
+    ImportacionEleventa.objects.create(archivo="x", hash_sha256=i.hash_sha256, nombre_original="y", usuario=admin_user)
+    assert ImportacionEleventa.objects.filter(hash_sha256=i.hash_sha256).count() == 2
 
 
 def test_subir_el_mismo_archivo_en_vista_previa_lleva_a_la_misma_vista_previa(adm):
@@ -561,7 +573,7 @@ def test_descartar_no_cambia_nada_y_permite_resubir(adm):
     i.refresh_from_db()
     assert i.estado == "descartada" and Producto.objects.count() == 0
     r = subir(adm, contenido)                       # se puede volver a subir
-    assert r.status_code == 302 and ImportacionEleventa.objects.get().estado == "vista_previa"
+    assert r.status_code == 302 and ImportacionEleventa.objects.order_by("-pk").first().estado == "vista_previa"
 
 
 # ------------------------------------------------------------------ 10. permisos

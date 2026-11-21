@@ -41,4 +41,11 @@
       <a class="boton secundario grande" href="{% if object %}{% url 'producto_detalle' object.pk %}{% else %}{% url 'producto_lista' %}{% endif %}">Cancelar</a>
     </div>
   </form>
+  {% if object and perms.inventario.archivar_producto and object.activo %}
+  <section class="zona-peligro form-ancho" aria-labelledby="zona-peligro">
+    <h2 id="zona-peligro">Zona de peligro</h2>
+    <p>Archivar saca el producto de la lista, las búsquedas y el panel. <strong>No se borra nada</strong>: el kardex se conserva y se puede reactivar después.</p>
+    <a class="boton peligro" href="{% url 'producto_archivar' object.pk %}">Archivar producto</a>
+  </section>
+  {% endif %}
 {% endblock %}

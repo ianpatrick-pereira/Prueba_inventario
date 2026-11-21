@@ -18,6 +18,13 @@
       <span class="detalle">{% if bajo_minimo %}Ver la lista y reponer{% else %}Todo sobre el mínimo{% endif %}</span>
     </a>
     {% endif %}
+    {% if perms.inventario.view_producto %}
+    <a class="tarjeta indicador {% if requieren_revision %}alerta{% else %}ok{% endif %}" href="{% url 'producto_lista' %}?revision=1">
+      <span class="etiqueta-cifra">Productos que requieren revisión</span>
+      <span class="cifra{% if requieren_revision %} alerta{% endif %}">{{ requieren_revision }}</span>
+      <span class="detalle">{% if requieren_revision %}⚠ Entraron con problemas: ver y corregir{% else %}Nada pendiente de revisar{% endif %}</span>
+    </a>
+    {% endif %}
     {% if perms.inventario.view_movimiento %}
     <div class="tarjeta indicador">
       <span class="etiqueta-cifra">Entradas de hoy</span>

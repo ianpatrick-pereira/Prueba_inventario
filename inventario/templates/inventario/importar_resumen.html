@@ -11,10 +11,13 @@
   </div>
   <div class="rejilla tres">
     <div class="tarjeta"><div class="etiqueta-cifra">Productos creados</div><div class="cifra">{{ r.creados }}</div></div>
+    <div class="tarjeta"><div class="etiqueta-cifra">Creados para revisión</div><div class="cifra{% if r.creados_para_revision %} alerta{% endif %}">{{ r.creados_para_revision|default:0 }}</div>{% if r.creados_para_revision %}<a href="{% url 'producto_lista' %}?revision=1">Ver los productos por revisar</a>{% endif %}</div>
+    <div class="tarjeta"><div class="etiqueta-cifra">Completados (estaban en revisión)</div><div class="cifra">{{ r.completados|default:0 }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Productos con stock cargado</div><div class="cifra">{{ r.productos_con_stock }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Unidades cargadas</div><div class="cifra">{{ r.unidades_cargadas|cantidad }}</div></div>
+    <div class="tarjeta"><div class="etiqueta-cifra">Códigos alternativos creados</div><div class="cifra">{{ r.alternativos_creados|default:0 }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Existentes actualizados</div><div class="cifra">{{ r.actualizados }}</div></div>
-    <div class="tarjeta"><div class="etiqueta-cifra">Filas con error (no importadas)</div><div class="cifra{% if r.con_error %} alerta{% endif %}">{{ r.con_error }}</div></div>
+    <div class="tarjeta"><div class="etiqueta-cifra">Filas con error (no creadas)</div><div class="cifra{% if r.con_error %} alerta{% endif %}">{{ r.con_error }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Filas omitidas (totales)</div><div class="cifra">{{ r.omitidas|length }}</div></div>
   </div>
   {% if imp.documento %}
@@ -32,8 +35,14 @@
     {% for d in r.diferencias %}<tr><td class="mono">{{ d.codigo }}</td><td class="num">{{ d.archivo|cantidad }}</td><td class="num">{{ d.sistema|cantidad }}</td><td class="num">{{ d.diferencia|cantidad }}</td></tr>{% endfor %}
   </table></div>
   {% endif %}
+  {% if r.para_revision_filas %}
+  <h2>Productos creados para revisión</h2>
+  <div class="tabla-scroll"><table><thead><tr><th>Fila</th><th>Código</th><th>Motivo</th></tr></thead>
+    {% for e in r.para_revision_filas %}<tr><td>{{ e.fila }}</td><td class="mono">{{ e.codigo }}</td><td>{{ e.motivo }}</td></tr>{% endfor %}
+  </table></div>
+  {% endif %}
   {% if r.errores %}
-  <h2>Filas con error (no importadas)</h2>
+  <h2>Filas con error (no creadas)</h2>
   <div class="tabla-scroll"><table><thead><tr><th>Fila</th><th>Código</th><th>Motivo</th></tr></thead>
     {% for e in r.errores %}<tr><td>{{ e.fila }}</td><td class="mono">{{ e.codigo|default:"-" }}</td><td>{{ e.mensajes|join:" " }}</td></tr>{% endfor %}
   </table></div>

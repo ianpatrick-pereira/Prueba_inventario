@@ -6,7 +6,7 @@ from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, Sum
 from django.utils import timezone
 
 from . import servicios
-from .models import Movimiento
+from .models import Movimiento, Producto
 
 
 def rango_de_hoy():
@@ -22,11 +22,12 @@ def panel_del_dia(usuario):
     if usuario.has_perm("inventario.view_producto"):
         datos["hay_panel"] = True
         valor = ExpressionWrapper(F("stock") * F("costo"), output_field=DecimalField(max_digits=24, decimal_places=2))
-        r = servicios.productos_con_stock().aggregate(
+        r = servicios.productos_con_stock(Producto.objects.filter(activo=True)).aggregate(
             bajo_minimo=Count("pk", filter=Q(stock_min__gt=0, stock__lte=F("stock_min"))),
             sin_costo=Count("pk", filter=Q(costo=0, stock__gt=0)),
             valor=Sum(valor),
         )
+        datos["requieren_revision"] = Producto.objects.filter(activo=True, requiere_revision=True).count()
         datos["bajo_minimo"] = r["bajo_minimo"]
         datos["sin_costo"] = r["sin_costo"]
         # Con productos con stock y costo 0 el valor no es confiable: no se muestra.

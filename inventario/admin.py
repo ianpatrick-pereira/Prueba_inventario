@@ -46,8 +46,13 @@ class ProveedorAdmin(admin.ModelAdmin):
 class ProductoAdmin(_SoloLecturaAlEditar):
     form = ProductoAdminForm    # no negativos, maximo >= minimo, sku normalizado
     campos_fijos = ("sku",)     # D-43: llave de sincronizacion con Eleventa
-    list_display = ("sku", "nombre", "categoria")
+    list_display = ("sku", "nombre", "categoria", "activo", "requiere_revision")
+    list_filter = ("activo", "requiere_revision")
     search_fields = ("sku", "nombre")
+
+    def has_delete_permission(self, request, obj=None):
+        """D-64: ningun producto se borra (ni desde la ficha ni con la accion masiva); se archiva."""
+        return False
 
 
 @admin.register(CodigoAlternativo)
