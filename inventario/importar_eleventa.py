@@ -18,6 +18,8 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import Q
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 from . import servicios
@@ -715,14 +717,19 @@ def _resolver_alternativos(filas):
     """D-62: decide que codigos de descripcion se crearan como codigo alternativo (tipo «fabricante»).
     Un valor que ya es sku de otro producto, codigo alternativo de OTRO producto, sku de otra fila del archivo
     o descripcion-codigo de una fila anterior del mismo archivo no se crea: la fila lleva una advertencia.
-    Si el producto ya tiene ese alternativo no hay nada que crear (idempotente)."""
+    K1: todas las comparaciones ignoran mayusculas (casefold). Si el producto ya tiene ese alternativo no hay
+    nada que crear (idempotente)."""
     candidatos = sorted({f.codigo_alt for f in filas if f.valida and f.codigo_alt and not f.mala_lectura})
-    en_bd_alt, en_bd_sku = {}, set()
-    for lote in _en_lotes(candidatos):
-        for a in CodigoAlternativo.objects.filter(valor__in=lote).select_related("producto"):
-            en_bd_alt[a.valor] = a.producto.sku
-        en_bd_sku.update(Producto.objects.filter(sku__in=lote).values_list("sku", flat=True))
-    skus_del_archivo = {f.codigo for f in filas if f.valida}
+    minusculas = sorted({c.lower() for c in candidatos} | set(candidatos))
+    en_bd_alt, en_bd_sku = {}, {}                                   # clave casefold -> valor del dueno
+    for lote in _en_lotes(minusculas):
+        for a in CodigoAlternativo.objects.annotate(_l=Lower("valor")).filter(
+                Q(_l__in=lote) | Q(valor__in=lote)).select_related("producto"):
+            en_bd_alt[a.valor.casefold()] = a.producto.sku
+        for sku in Producto.objects.annotate(_l=Lower("sku")).filter(
+                Q(_l__in=lote) | Q(sku__in=lote)).values_list("sku", flat=True):
+            en_bd_sku[sku.casefold()] = sku
+    skus_del_archivo = {f.codigo.casefold(): f.codigo for f in filas if f.valida}
     vistos = {}
     for f in filas:
         f.alt_crear = ""
@@ -730,17 +737,18 @@ def _resolver_alternativos(filas):
         if not (f.valida and f.codigo_alt) or f.mala_lectura:
             continue
         x = f.codigo_alt
-        if x in en_bd_sku or x in skus_del_archivo:
-            dueno = x
-        elif x in en_bd_alt:
-            if en_bd_alt[x] == f.codigo:
+        k = x.casefold()
+        if k in en_bd_sku or k in skus_del_archivo:
+            dueno = en_bd_sku.get(k) or skus_del_archivo[k]
+        elif k in en_bd_alt:
+            if en_bd_alt[k].casefold() == f.codigo.casefold():
                 continue                                      # este producto ya lo tiene: nada que crear
-            dueno = en_bd_alt[x]
-        elif x in vistos:
-            dueno = vistos[x]
+            dueno = en_bd_alt[k]
+        elif k in vistos:
+            dueno = vistos[k]
         else:
             f.alt_crear = x
-            vistos[x] = f.codigo
+            vistos[k] = f.codigo
             continue
         f.advertencias.append(f"{_PREFIJO_AVISO_ALT} {x} ya pertenece a {dueno}: no se crea como código alternativo.")
 
@@ -815,6 +823,10 @@ class ImportacionNoValida(ValidationError):
     pass
 
 
+class _AnalisisDesactualizado(ImportacionNoValida):
+    pass
+
+
 def _exigir_importar(usuario):
     if not (getattr(usuario, "is_authenticated", False) and usuario.is_active
             and usuario.has_perm("inventario.importar_eleventa")):
@@ -839,6 +851,9 @@ def confirmar(importacion_id, usuario, actualizar_existentes=False):
     filas = analizar_contenido(contenido, imp.nombre_original)          # fuera de la transaccion
     try:
         return _aplicar(importacion_id, usuario, filas, actualizar_existentes)
+    except _AnalisisDesactualizado:
+        asegurar_analisis_vigente(ImportacionEleventa.objects.get(pk=importacion_id))
+        raise
     except IntegrityError:
         raise ImportacionNoValida(
             "Otro usuario creó uno de estos códigos mientras confirmabas: no se importó nada. "
@@ -851,6 +866,11 @@ def _aplicar(importacion_id, usuario, filas, actualizar_existentes):
         imp = ImportacionEleventa.objects.select_for_update().get(pk=importacion_id)
         if imp.estado != ImportacionEleventa.VISTA_PREVIA:
             raise ImportacionNoValida("Esta importación ya no está en vista previa.")
+        if (imp.analisis or {}).get("version", 1) != ANALIZADOR_VERSION:
+            # K2: nunca se confirma algo distinto de lo que la persona vio. Se re-analiza (en otra transaccion,
+            # porque esta se deshace al lanzar el error) y se pide revisar de nuevo.
+            raise _AnalisisDesactualizado(
+                "El sistema se actualizó: revisa de nuevo la vista previa antes de confirmar.")
         if ImportacionEleventa.objects.filter(
             hash_sha256=imp.hash_sha256, estado=ImportacionEleventa.CONFIRMADA
         ).exists():

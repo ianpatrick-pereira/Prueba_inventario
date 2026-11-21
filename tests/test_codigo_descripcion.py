@@ -143,3 +143,90 @@ def test_comando_simular_aplicar_e_idempotencia():
     call_command("codigos_desde_descripcion", "--aplicar", stdout=StringIO())
     assert CodigoAlternativo.objects.count() == 1
     assert set(Producto.objects.values_list("sku", flat=True)) == {"566", "2", "3", "4"}
+
+
+# ------------------------------------------------------------------ K1: sin distinguir mayusculas
+def test_k1_minusculas_frente_a_sku_de_la_base(adm):
+    Producto.objects.create(sku="A0204", nombre="Previo")
+    i, r = previa(adm, [fila("N1", "a0204")])
+    assert any("ya pertenece a A0204" in a for a in r.context["pagina"][0].advertencias)
+    confirmar_http(adm, i)
+    assert alts() == {}
+
+
+def test_k1_minusculas_frente_a_alternativo_de_la_base(adm):
+    p = Producto.objects.create(sku="P1", nombre="Previo")
+    CodigoAlternativo.objects.create(producto=p, tipo="fabricante", valor="B100")
+    i, r = previa(adm, [fila("N1", "b100")])
+    assert any("ya pertenece a P1" in a for a in r.context["pagina"][0].advertencias)
+    confirmar_http(adm, i)
+    assert alts() == {"B100": ("P1", "fabricante")}
+
+
+def test_k1_repetido_en_el_archivo_con_otras_mayusculas(adm):
+    i, r = previa(adm, [fila("A", "C300"), fila("B", "c300")])
+    avisos = {f.codigo: f.advertencias for f in r.context["pagina"]}
+    assert any("ya pertenece a A" in a for a in avisos["B"])
+    confirmar_http(adm, i)
+    assert alts() == {"C300": ("A", "fabricante")}
+
+
+def test_k1_descripcion_que_solo_difiere_del_propio_sku_en_mayusculas_no_crea(adm):
+    i, r = previa(adm, [fila("ab12", "AB12")])
+    assert not r.context["pagina"][0].advertencias or not any(
+        "código de la descripción" in a for a in r.context["pagina"][0].advertencias)
+    confirmar_http(adm, i)
+    assert alts() == {}
+
+
+def test_k1_comando_sin_distinguir_mayusculas():
+    Producto.objects.create(sku="566", nombre="A0204")
+    Producto.objects.create(sku="567", nombre="a0204")           # conflicto con el alternativo que se creara
+    Producto.objects.create(sku="X9", nombre="x9")               # mismo sku con otras mayusculas: nada
+    Producto.objects.create(sku="K1", nombre="k1")
+    Producto.objects.create(sku="otro", nombre="K1")             # conflicto con el sku K1
+    salida = StringIO()
+    call_command("codigos_desde_descripcion", "--aplicar", stdout=salida)
+    assert alts() == {"A0204": ("566", "fabricante")}
+    assert "Conflictos (no se crean): 2" in salida.getvalue()
+
+
+def test_k1_la_base_rechaza_alternativos_que_solo_difieren_en_mayusculas():
+    from django.db import IntegrityError, transaction
+    p = Producto.objects.create(sku="P1", nombre="Previo")
+    CodigoAlternativo.objects.create(producto=p, tipo="fabricante", valor="A0204")
+    with pytest.raises(IntegrityError), transaction.atomic():
+        CodigoAlternativo.objects.create(producto=p, tipo="barras", valor="a0204")
+
+
+def test_k1_la_migracion_se_detiene_y_lista_los_duplicados_sin_borrar():
+    from importlib import import_module
+    from django.apps import apps as django_apps
+    from django.db import connection
+    migracion = import_module("inventario.migrations.0005_codigo_unico_sin_mayusculas")
+    p = Producto.objects.create(sku="P1", nombre="Previo")
+    with connection.cursor() as c:     # se simula un duplicado preexistente saltando la restriccion
+        c.execute('DROP INDEX "codigoalternativo_valor_unico_sin_mayusculas"')
+    CodigoAlternativo.objects.create(producto=p, tipo="fabricante", valor="Z1")
+    CodigoAlternativo.objects.create(producto=p, tipo="barras", valor="z1")
+    with pytest.raises(RuntimeError) as e:
+        migracion.revisar_duplicados(django_apps, None)
+    assert "Z1" in str(e.value) and "z1" in str(e.value)
+    assert CodigoAlternativo.objects.count() == 2                # no borra nada
+
+
+# ------------------------------------------------------------------ K2: version del analisis al confirmar
+def test_k2_confirmar_con_analisis_de_version_vieja_se_rechaza_y_se_reanaliza(adm):
+    from tests.test_importar_eleventa import token_de
+    i = preparar(adm, xlsx([fila("566", "A0204")]))
+    url = reverse("importar_vista_previa", args=[i.pk])
+    token = token_de(adm.get(url))                       # la persona ve la vista previa...
+    i.refresh_from_db()
+    i.analisis = {**i.analisis, "version": 1}            # ...y el sistema se actualiza antes de que confirme
+    i.save()
+    r = adm.post(url, {"token": token, "accion": "confirmar"})
+    assert r.status_code == 302 and r.url == url and Producto.objects.count() == 0
+    i.refresh_from_db()
+    assert i.estado == "vista_previa" and i.analisis["version"] == imp.ANALIZADOR_VERSION
+    assert "El sistema se actualizó" in adm.get(url).content.decode()
+    assert confirmar_http(adm, i).status_code == 302 and Producto.objects.count() == 1

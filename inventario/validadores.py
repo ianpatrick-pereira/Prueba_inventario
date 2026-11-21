@@ -70,7 +70,7 @@ def codigo_desde_descripcion(codigo, descripcion):
     Devuelve ese valor o "" (descripcion igual al codigo, con espacios, vacia, demasiado larga o que
     empieza con =, +, -, @ o comillas: nunca se alteran ni se adivinan los codigos)."""
     d = (descripcion or "").strip()
-    if not d or re.search(r"\s", d) or d == (codigo or "").strip() or len(d) > _MAX_CODIGO_ALTERNATIVO:
+    if not d or re.search(r"\s", d) or d.casefold() == (codigo or "").strip().casefold() or len(d) > _MAX_CODIGO_ALTERNATIVO:
         return ""
     if d.startswith(("=", "+", "-", "@", '"')) or d.endswith('"'):
         return ""

@@ -24,23 +24,24 @@ class Command(BaseCommand):
 
     def handle(self, *args, aplicar=False, **opciones):
         productos = list(Producto.objects.order_by("pk").values_list("pk", "sku", "nombre"))
-        skus = {sku for _, sku, _ in productos}
-        alternativos = dict(CodigoAlternativo.objects.values_list("valor", "producto__sku"))
+        skus = {sku.casefold(): sku for _, sku, _ in productos}                  # K1: sin distinguir mayusculas
+        alternativos = {valor.casefold(): sku for valor, sku in CodigoAlternativo.objects.values_list("valor", "producto__sku")}
         por_crear, conflictos, ya_existen = [], [], 0
         for pk, sku, nombre in productos:
             valor = codigo_desde_descripcion(sku, nombre)
             if not valor:
                 continue
-            if valor in skus:
-                conflictos.append((sku, valor, valor))
-            elif valor in alternativos:
-                if alternativos[valor] == sku:
+            k = valor.casefold()
+            if k in skus:
+                conflictos.append((sku, valor, skus[k]))
+            elif k in alternativos:
+                if alternativos[k].casefold() == sku.casefold():
                     ya_existen += 1
                 else:
-                    conflictos.append((sku, valor, alternativos[valor]))
+                    conflictos.append((sku, valor, alternativos[k]))
             else:
                 por_crear.append((pk, sku, valor))
-                alternativos[valor] = sku             # el siguiente producto con el mismo valor sera conflicto
+                alternativos[k] = sku             # el siguiente producto con el mismo valor sera conflicto
         if aplicar and por_crear:
             with transaction.atomic():
                 CodigoAlternativo.objects.bulk_create(

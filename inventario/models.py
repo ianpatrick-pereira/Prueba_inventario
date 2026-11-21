@@ -14,7 +14,7 @@ from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import models
 from django.db.models import Q, Value
-from django.db.models.functions import Trim
+from django.db.models.functions import Lower, Trim
 from django.db.models.lookups import Exact
 from django.db.models.signals import pre_save
 from django.dispatch import receiver
@@ -140,6 +140,13 @@ class CodigoAlternativo(models.Model):
         verbose_name = "código alternativo"
         verbose_name_plural = "códigos alternativos"
         ordering = ["valor"]
+        constraints = [
+            # K1: «a0204» y «A0204» son el mismo codigo para la busqueda; la base no deja que convivan.
+            models.UniqueConstraint(
+                Lower("valor"), name="codigoalternativo_valor_unico_sin_mayusculas",
+                violation_error_message="Ese código alternativo ya existe (sin distinguir mayúsculas).",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.valor} ({self.get_tipo_display()})"
