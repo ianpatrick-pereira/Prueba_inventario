@@ -17,10 +17,11 @@
     <div class="etiqueta-cifra">Stock actual</div>
     <div class="cifra{% if producto.stock_min > 0 and stock <= producto.stock_min %} alerta{% endif %}">{{ stock|cl }} <span class="ayuda">{{ producto.unidad }}</span></div>
     {% if producto.stock_min > 0 and stock <= producto.stock_min %}<p><span class="insignia insignia-bajo">bajo mínimo</span> <span class="ayuda">(mínimo {{ producto.stock_min|cl }})</span></p>{% endif %}
+    {% if not producto.activo %}<p><span class="insignia insignia-archivado">Producto archivado</span> <span class="ayuda">No admite movimientos nuevos. <a href="{% url 'producto_detalle' producto.pk %}">Reactivarlo desde su ficha</a>.</span></p>{% endif %}
     <div class="acciones">
-      {% if perms.inventario.registrar_entrada %}<a class="boton grande" href="{% url 'entrada' producto.pk %}">Registrar entrada</a>{% endif %}
+      {% if producto.activo %}{% if perms.inventario.registrar_entrada %}<a class="boton grande" href="{% url 'entrada' producto.pk %}">Registrar entrada</a>{% endif %}
       {% if perms.inventario.registrar_salida %}<a class="boton grande" href="{% url 'salida' producto.pk %}">Registrar salida</a>{% endif %}
-      {% if perms.inventario.registrar_ajuste %}<a class="boton secundario grande" href="{% url 'corregir' producto.pk %}">Corregir stock</a>{% endif %}
+      {% if perms.inventario.registrar_ajuste %}<a class="boton secundario grande" href="{% url 'corregir' producto.pk %}">Corregir stock</a>{% endif %}{% endif %}
     </div>
   </div>
 
@@ -58,7 +59,7 @@
           {% if f.m.revierte_id %}<br><span class="ayuda">Reversa del movimiento <a href="#mov-{{ f.m.revierte_id }}">n.º {{ f.m.revierte_id }}</a></span>{% endif %}
           {% if f.reversa_id %}<br><span class="ayuda">Revertido por el movimiento <a href="#mov-{{ f.reversa_id }}">n.º {{ f.reversa_id }}</a></span>{% endif %}
         </td>
-        <td class="num">{% if perms.inventario.revertir_movimiento and f.puede_revertir %}<a href="{% url 'movimiento_revertir' f.m.pk %}">Revertir</a>{% endif %}</td>
+        <td class="num">{% if producto.activo and perms.inventario.revertir_movimiento and f.puede_revertir %}<a href="{% url 'movimiento_revertir' f.m.pk %}">Revertir</a>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>

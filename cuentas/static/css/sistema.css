@@ -209,6 +209,8 @@ input[type=checkbox] { width: 20px; height: 20px; vertical-align: middle; margin
 .insignia-aviso { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
 .insignia-nueva { background: var(--ok-soft); color: var(--ok); border-color: var(--ok); }
 .insignia-existente { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.insignia-urgente { background: #b45309; color: #fff; border-color: #7a3a00; font-size: 13px; padding: 3px 12px; margin-left: 8px; }
+.insignia-archivado { background: #455a64; color: #fff; border-color: #263238; }
 .insignia-reversa { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
 
 /* ---------- barra de stock ---------- */
@@ -237,6 +239,19 @@ td { padding: 10px 16px; border-top: 1px solid #e6eeec; vertical-align: middle; 
 tbody tr:hover { background: var(--fila-hover); }
 td.num, th.num { text-align: right; }
 tr.bajo td, tr.bajo:hover td { background: var(--bad-soft); }
+tr.revision td { background: #fff4e0; }
+tr.revision td:first-child { box-shadow: inset 6px 0 0 #b45309; }
+tr.bajo.revision td { background: var(--bad-soft); }
+.chip-revision { border-color: #b45309; color: #7a3a00; background: #fff4e0; }
+.chip-revision:hover { background: #ffe4b8; }
+.chip-revision[aria-current="true"] { background: #b45309; color: #fff; border-color: #7a3a00; }
+.chips-estado { margin-top: calc(-1 * var(--s1)); }
+.aviso-revision, .aviso-archivado { border: 2px solid #b45309; background: #fff4e0; color: #4a2500; border-radius: var(--radio-chico); padding: var(--s2); margin-bottom: var(--s2); }
+.aviso-revision strong, .aviso-archivado strong { font-size: 18px; }
+.aviso-revision p, .aviso-archivado p { margin: var(--s1) 0 0; }
+.aviso-archivado { border-color: #455a64; background: #eceff1; color: #1c2a30; }
+.zona-peligro { border: 2px solid var(--bad-solid); border-radius: var(--radio-chico); padding: var(--s2); margin-top: var(--s3); background: var(--bad-soft); }
+.zona-peligro h2 { color: var(--bad); margin-top: 0; }
 tr.bajo td.stock { color: var(--bad); font-weight: 700; }
 .tarjeta table th { background: var(--cabecera-tabla); }
 .solo-impresion { display: none; }
@@ -311,6 +326,7 @@ body:not(.con-lateral) .marca-ingreso { color: var(--lateral); font-family: var(
   .solo-impresion { display: table-cell !important; }
   a { color: #000; text-decoration: none; }
   .insignia { border: 1px solid #000; background: none; color: #000; }
+  tr.revision td { background: none !important; }
 }
 .solo-impresion-bloque { display: none; }
 @media print { .solo-impresion-bloque { display: block !important; margin-bottom: 8px; } }

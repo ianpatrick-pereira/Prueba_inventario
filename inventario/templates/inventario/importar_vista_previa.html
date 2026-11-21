@@ -10,12 +10,14 @@
   </div>
   {% if avisos %}<ul class="mensajes" role="status">{% for a in avisos %}<li class="warning">{{ a }}</li>{% endfor %}</ul>{% endif %}
   {% if codificacion %}<p class="ayuda">Codificación detectada: <strong>{{ codificacion }}</strong></p>{% endif %}
+  {% if ya_cargado %}<ul class="mensajes" role="status"><li class="warning">Este archivo ya se cargó el {{ ya_cargado.fecha|date:"d-m-Y H:i" }}: solo se crearán los productos que falten. Los productos que ya existen no cambian de stock.</li></ul>{% endif %}
   <div class="rejilla tres">
     <div class="tarjeta"><div class="etiqueta-cifra">Filas leídas</div><div class="cifra">{{ resumen.filas }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Productos nuevos</div><div class="cifra">{{ resumen.nuevas }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Productos que ya existen</div><div class="cifra">{{ resumen.existentes }}</div></div>
+    <div class="tarjeta"><div class="etiqueta-cifra">Se crearán para revisión</div><div class="cifra{% if resumen.para_revision %} alerta{% endif %}">{{ resumen.para_revision }}</div><div class="ayuda">Sin precios ni stock, marcados «Requiere modificación urgente»</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Filas con advertencia</div><div class="cifra">{{ resumen.con_advertencia }}</div></div>
-    <div class="tarjeta"><div class="etiqueta-cifra">Filas con error (no se importan)</div><div class="cifra{% if resumen.con_error %} alerta{% endif %}">{{ resumen.con_error }}</div></div>
+    <div class="tarjeta"><div class="etiqueta-cifra">Filas con error (no se crean)</div><div class="cifra{% if resumen.con_error %} alerta{% endif %}">{{ resumen.con_error }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Unidades totales a cargar</div><div class="cifra">{{ resumen.unidades|cantidad }}</div></div>
     <div class="tarjeta"><div class="etiqueta-cifra">Códigos alternativos que se crearán</div><div class="cifra">{{ resumen.alternativos }}</div>{% if resumen.alternativos_en_existentes %}<div class="ayuda">+ {{ resumen.alternativos_en_existentes }} en productos existentes si marcas «actualizar»</div>{% endif %}</div>
   </div>
@@ -37,16 +39,18 @@
     <thead><tr><th>Fila</th><th>Código</th><th>Descripción</th><th class="num">Inventario</th><th class="num">Costo</th><th class="num">Precio venta</th><th>Código de la descripción</th><th>Estado</th><th>Mensajes</th></tr></thead>
     <tbody>
     {% for f in pagina %}
-      <tr{% if f.estado == "error" %} class="bajo"{% endif %}>
+      <tr{% if f.estado == "error" %} class="bajo"{% elif f.estado == "revision" %} class="revision"{% endif %}>
         <td>{{ f.numero }}</td><td class="mono">{{ f.codigo|default:"-" }}</td><td>{{ f.descripcion|default:"-" }}</td>
         <td class="num">{% if f.inventario is None %}-{% else %}{{ f.inventario|cantidad }}{% endif %}</td>
         <td class="num">{{ f.costo|pesos }}</td>
         <td class="num">{{ f.precio_venta|pesos }}</td>
         <td class="mono">{% if f.alt_crear %}{{ f.alt_crear }} <span class="ayuda">(alternativo)</span>{% else %}-{% endif %}</td>
-        <td>{% if f.estado == "nueva" %}<span class="insignia insignia-nueva">Nueva</span>{% elif f.estado == "existente" %}<span class="insignia insignia-existente">Existente</span>{% else %}<span class="insignia insignia-error">Error</span>{% endif %}
+        <td>{% if f.estado == "nueva" %}<span class="insignia insignia-nueva">Nueva</span>{% elif f.estado == "existente" %}<span class="insignia insignia-existente">Existente</span>{% elif f.estado == "revision" %}<span class="insignia insignia-urgente">Se creará para revisión</span>{% else %}<span class="insignia insignia-error">Error</span>{% endif %}
             {% if f.advertencias and f.estado != "error" %}<span class="insignia insignia-aviso">advertencia</span>{% endif %}</td>
         <td>
           {% for m in f.errores %}<div class="error">{{ m }}</div>{% endfor %}
+          {% if f.nota %}<div class="ayuda">{{ f.nota }}</div>{% endif %}
+          {% if f.estado == "revision" %}<div class="ayuda">Se crea solo con código y nombre «{{ f.nombre_revision }}», sin precios ni stock.</div>{% endif %}
           {% for m in f.advertencias %}<div class="ayuda">{{ m }}</div>{% endfor %}
           {% if f.diferencia is not None %}<div class="ayuda">Sistema: {{ f.stock_sistema|cantidad }}; archivo: {{ f.inventario|cantidad }}; diferencia {{ f.diferencia|cantidad }} (no se modifica).</div>{% endif %}
         </td>

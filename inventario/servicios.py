@@ -156,8 +156,15 @@ def kardex(producto):
 
 
 def _bloquear(producto):
-    """Bloquea el producto (debe llamarse dentro de atomic) y devuelve la fila fresca."""
-    return Producto.objects.select_for_update().get(pk=producto.pk)
+    """Bloquea el producto (debe llamarse dentro de atomic) y devuelve la fila fresca.
+    D-64: un producto archivado no admite movimientos nuevos (hay que reactivarlo primero)."""
+    fresco = Producto.objects.select_for_update().get(pk=producto.pk)
+    if not fresco.activo:
+        raise ValidationError(
+            f"El producto {fresco.sku} está archivado: reactívalo antes de registrar movimientos.",
+            code="producto_archivado",
+        )
+    return fresco
 
 
 def _crear(producto, tipo, cantidad, usuario, *, documento=None, fecha=None, motivo="",

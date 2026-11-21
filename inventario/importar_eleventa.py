@@ -368,10 +368,26 @@ class Fila:
     mala_lectura: bool = False    # advertencia de posible mala decodificacion de tildes
     codigo_alt: str = ""          # D-62: codigo de la descripcion (candidato a codigo alternativo)
     alt_crear: str = ""           # el que realmente se creara (sin conflicto); lo calcula clasificar()
+    revision: bool = False        # D-63: fila con error que se crea igual, marcada para revision (lo calcula clasificar())
+    nota: str = ""                # aclaracion de clasificar() para filas con error que no se crean (no se guarda)
 
     @property
     def valida(self):
         return not self.errores
+
+    @property
+    def motivo_revision(self):
+        """Texto que queda en el producto creado para revision (los mensajes de error de la fila)."""
+        return f"Fila {self.numero} del archivo: " + " ".join(self.errores)
+
+    @property
+    def nombre_revision(self):
+        """Nombre del producto creado para revision. Si la descripcion no es confiable (fila corrida, vacia o
+        demasiado larga) se usa el codigo."""
+        corrida = any(e.startswith("La fila tiene") for e in self.errores)
+        if corrida or not self.descripcion or len(self.descripcion) > 200:
+            return self.codigo
+        return self.descripcion
 
     CAMPOS_GUARDADOS = ("numero", "codigo", "descripcion", "departamento", "costo", "precio_venta",
                         "precio_mayoreo", "inventario", "minimo", "errores", "advertencias", "mala_lectura", "codigo_alt")
@@ -688,16 +704,34 @@ def _en_lotes(valores, n=500):
 
 
 def clasificar(filas):
-    """Marca cada fila como nueva/existente/error consultando la base (stock actual de las existentes)."""
+    """Marca cada fila como nueva/existente/revision/error consultando la base (stock actual de las existentes).
+
+    D-63: una fila con error ya no se descarta si tiene un codigo usable (no vacio, hasta 50 caracteres) que no
+    existe en la base: estado «revision» (se crea marcada, sin stock ni precios). En un codigo repetido dentro del
+    archivo solo la primera fila se crea; las demas se listan como error. Un codigo que ya existe no se toca."""
     skus = [f.codigo for f in filas if f.codigo and f.valida]
     existentes = {}
     for lote in _en_lotes(skus):
         for p in servicios.productos_con_stock(Producto.objects.filter(sku__in=lote)):
             existentes[p.sku] = p
+    usables = sorted({f.codigo for f in filas if not f.valida and f.codigo and len(f.codigo) <= 50})
+    en_bd = set()
+    for lote in _en_lotes(usables):
+        en_bd.update(Producto.objects.filter(sku__in=lote).values_list("sku", flat=True))
+    creadas_para_revision = {}                      # codigo -> numero de fila que lo crea
     for f in filas:
-        f.estado, f.stock_sistema, f.diferencia = "nueva", None, None
+        f.estado, f.stock_sistema, f.diferencia, f.revision, f.nota = "nueva", None, None, False, ""
         if not f.valida:
             f.estado = "error"
+            if f.codigo and len(f.codigo) <= 50:
+                if f.codigo in en_bd:
+                    f.nota = "Ese código ya existe en el sistema: no se toca."
+                elif f.codigo in creadas_para_revision:
+                    f.nota = (f"Código repetido: el producto se crea una sola vez, desde la fila "
+                              f"{creadas_para_revision[f.codigo]}.")
+                else:
+                    creadas_para_revision[f.codigo] = f.numero
+                    f.estado, f.revision = "revision", True
             continue
         p = existentes.get(f.codigo)
         if p is None:
@@ -729,7 +763,7 @@ def _resolver_alternativos(filas):
         for sku in Producto.objects.annotate(_l=Lower("sku")).filter(
                 Q(_l__in=lote) | Q(sku__in=lote)).values_list("sku", flat=True):
             en_bd_sku[sku.casefold()] = sku
-    skus_del_archivo = {f.codigo.casefold(): f.codigo for f in filas if f.valida}
+    skus_del_archivo = {f.codigo.casefold(): f.codigo for f in filas if f.valida or f.revision}
     vistos = {}
     for f in filas:
         f.alt_crear = ""
@@ -761,6 +795,7 @@ def resumir(filas):
         "existentes": sum(f.estado == "existente" for f in filas),
         "con_advertencia": sum(bool(f.advertencias) and f.valida for f in filas),
         "con_error": sum(f.estado == "error" for f in filas),
+        "para_revision": sum(f.estado == "revision" for f in filas),
         "unidades": str(sum((f.inventario or Decimal("0") for f in nuevas), Decimal("0"))),
         "alternativos": sum(bool(f.alt_crear) for f in nuevas),
         "alternativos_en_existentes": sum(bool(f.alt_crear) for f in filas if f.estado == "existente"),
@@ -871,13 +906,10 @@ def _aplicar(importacion_id, usuario, filas, actualizar_existentes):
             # porque esta se deshace al lanzar el error) y se pide revisar de nuevo.
             raise _AnalisisDesactualizado(
                 "El sistema se actualizó: revisa de nuevo la vista previa antes de confirmar.")
-        if ImportacionEleventa.objects.filter(
-            hash_sha256=imp.hash_sha256, estado=ImportacionEleventa.CONFIRMADA
-        ).exists():
-            raise ImportacionNoValida("Este archivo ya fue importado antes.")
         clasificar(filas)                                                 # que sku existen AHORA
         nuevas = [f for f in filas if f.estado == "nueva"]
         existentes = [f for f in filas if f.estado == "existente"]
+        revisiones = [f for f in filas if f.estado == "revision"]            # D-63
         # categorias (comparadas sin mayusculas ni espacios)
         categorias = {clave_nombre(c.nombre): c for c in Categoria.objects.all()}
         faltan = {}
@@ -901,6 +933,12 @@ def _aplicar(importacion_id, usuario, filas, actualizar_existentes):
             )
             p.full_clean(exclude=["categoria"], validate_unique=False, validate_constraints=False)
             productos.append(p)
+        for f in revisiones:      # D-63: solo codigo y nombre; sin precios, stock ni categoria; marcado para revision
+            p = Producto(sku=f.codigo, nombre=f.nombre_revision, requiere_revision=True,
+                         motivo_revision=f.motivo_revision)
+            p.full_clean(exclude=["categoria"], validate_unique=False, validate_constraints=False)
+            productos.append(p)
+        nuevas = nuevas + revisiones                                          # mismo orden que `productos`
         Producto.objects.bulk_create(productos, batch_size=500)
         # existentes: nunca se toca el stock; los datos solo si el usuario lo pidio
         actualizados = 0
@@ -941,7 +979,7 @@ def _aplicar(importacion_id, usuario, filas, actualizar_existentes):
             CodigoAlternativo.objects.bulk_create(alternativos, batch_size=500)
         # inventario inicial (solo productos nuevos con inventario > 0)
         con_stock = [(p, f.inventario) for p, f in zip(productos, nuevas)
-                     if f.inventario is not None and f.inventario > 0]
+                     if not f.revision and f.inventario is not None and f.inventario > 0]
         documento = None
         if con_stock:
             documento = Documento.objects.create(
@@ -956,12 +994,14 @@ def _aplicar(importacion_id, usuario, filas, actualizar_existentes):
         resumen.update({
             "pasaron_a_existentes": pasaron,
             "alternativos_creados": len(alternativos),
-            "creados": len(productos), "actualizados": actualizados, "productos_con_stock": len(con_stock),
+            "creados": len(productos), "creados_para_revision": len(revisiones), "actualizados": actualizados, "productos_con_stock": len(con_stock),
             "unidades_cargadas": str(sum((c for _, c in con_stock), Decimal("0"))),
             "diferencias": diferencias,
             "no_actualizados_mala_lectura": no_actualizados if actualizar_existentes else [],
             "errores": [{"fila": f.numero, "codigo": f.codigo, "mensajes": f.errores}
                         for f in filas if f.estado == "error"],
+            "para_revision_filas": [{"fila": f.numero, "codigo": f.codigo, "motivo": " ".join(f.errores)}
+                                    for f in revisiones],
             "omitidas": filas.omitidas, "vacias": filas.vacias,
             "actualizar_existentes": bool(actualizar_existentes),
             "documento_id": documento.pk if documento else None,

@@ -90,11 +90,17 @@ class Producto(models.Model):
     precio_mayoreo = _monto(verbose_name="precio mayoreo", default=Decimal("0"))
     stock_min = _cantidad(verbose_name="stock mínimo", default=Decimal("0"))
     stock_max = _cantidad(verbose_name="stock máximo", default=Decimal("0"))
+    # D-63: un producto que entro de una fila con problemas queda marcado hasta que alguien lo revise.
+    requiere_revision = models.BooleanField("requiere revisión", default=False, db_default=False)
+    motivo_revision = models.TextField("motivo de la revisión", blank=True, default="", db_default="")
+    # D-64: archivar no borra nada; el producto sale de la lista, la busqueda y el panel y conserva su kardex.
+    activo = models.BooleanField("activo", default=True, db_default=True)
 
     class Meta:
         verbose_name = "producto"
         verbose_name_plural = "productos"
         ordering = ["nombre"]
+        permissions = [("archivar_producto", "Puede archivar y reactivar productos")]
         constraints = [
             models.CheckConstraint(
                 condition=Q(costo__gte=0), name="producto_costo_no_negativo",
@@ -474,7 +480,7 @@ class ImportacionEleventa(models.Model):
     ESTADOS = [(VISTA_PREVIA, "Vista previa"), (CONFIRMADA, "Confirmada"), (DESCARTADA, "Descartada")]
 
     archivo = models.FileField("archivo", upload_to=ruta_importacion)
-    hash_sha256 = models.CharField("hash SHA-256", max_length=64, unique=True)
+    hash_sha256 = models.CharField("hash SHA-256", max_length=64, db_index=True)
     nombre_original = models.CharField("nombre original", max_length=255)
     usuario = models.ForeignKey(
         settings.AUTH_USER_MODEL, verbose_name="usuario", on_delete=models.PROTECT

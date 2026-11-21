@@ -24,7 +24,7 @@ CLAVE = "Zq7-mPx2vL-prueba"
 MODELOS = ["categoria", "proveedor", "producto", "codigoalternativo", "productoproveedor",
            "documento", "movimiento"]
 PERSONALIZADOS = {"registrar_entrada", "registrar_salida", "registrar_ajuste", "revertir_movimiento",
-                  "permitir_stock_negativo", "importar_eleventa"}
+                  "permitir_stock_negativo", "importar_eleventa", "archivar_producto"}
 # Escrita a mano, independiente de la migracion (D-38).
 OPERADOR = (
     {f"view_{m}" for m in MODELOS}
@@ -32,7 +32,7 @@ OPERADOR = (
        for a in ("add", "change")}
     | {"add_documento", "registrar_entrada", "registrar_salida"}
 )
-# 8 modelos x 4 + 6 personalizados = 38.
+# 8 modelos x 4 + 7 personalizados = 39 (archivar_producto, D-64).
 ADMINISTRADOR = ({f"{a}_{m}" for m in MODELOS + ["importacioneleventa"] for a in ("add", "change", "delete", "view")}
                  | PERSONALIZADOS)
 
@@ -63,10 +63,11 @@ def test_los_grupos_existen_con_exactamente_los_permisos_de_d38():
 
 def test_tamanos_de_la_matriz_d38_y_d40():
     assert len(OPERADOR) == 20 and len(codenames("Operador")) == 20
-    assert len(ADMINISTRADOR) == 38 and len(codenames("Administrador")) == 38  # 33 + 5 nuevos (4 del modelo + importar_eleventa)
+    assert len(ADMINISTRADOR) == 39 and len(codenames("Administrador")) == 39  # 33 + 5 (importacion) + archivar_producto
     assert "importar_eleventa" in codenames("Administrador") and "importar_eleventa" not in codenames("Operador")
     assert "permitir_stock_negativo" in codenames("Administrador")
     assert "permitir_stock_negativo" not in codenames("Operador")
+    assert "archivar_producto" in codenames("Administrador") and "archivar_producto" not in codenames("Operador")
 
 
 def test_el_operador_no_puede_ajustar_revertir_ni_borrar():

@@ -16,6 +16,25 @@
     </div>
   </div>
 
+  {% if not producto.activo %}
+  <div class="aviso-archivado" role="status">
+    <strong>Producto archivado</strong>
+    <p>No aparece en la lista, las búsquedas ni el panel, y no admite movimientos nuevos. Su kardex se conserva.</p>
+    {% if perms.inventario.archivar_producto %}<form method="post" action="{% url 'producto_reactivar' producto.pk %}" class="acciones">{% csrf_token %}<button type="submit" class="grande">Reactivar producto</button></form>{% endif %}
+  </div>
+  {% endif %}
+  {% if producto.requiere_revision %}
+  <div class="aviso-revision" role="alert">
+    <strong>⚠ Requiere modificación urgente</strong>
+    <p>Este producto entró desde un archivo de Eleventa con problemas, sin precios ni stock. Motivo: {{ producto.motivo_revision|default:"sin detalle" }}</p>
+    <div class="acciones">
+      {% if perms.inventario.change_producto %}<a class="boton" href="{% url 'producto_editar' producto.pk %}">Editar producto</a>{% endif %}
+      {% if producto.activo and perms.inventario.registrar_ajuste %}<a class="boton secundario" href="{% url 'corregir' producto.pk %}">Corregir stock</a>{% endif %}
+      {% if perms.inventario.change_producto %}<form method="post" action="{% url 'producto_revisado' producto.pk %}" style="display:inline">{% csrf_token %}<button type="submit" class="secundario">Marcar como revisado</button></form>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
   <div class="rejilla dos">
     <div class="tarjeta">
       <div class="etiqueta-cifra">Stock actual</div>

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% load formato %}
+{% block titulo %}Archivar producto - Sistema de inventario{% endblock %}
+{% block migas %}
+  <nav class="migas" aria-label="Ruta"><a href="{% url 'producto_lista' %}">← Productos</a> <span aria-hidden="true">›</span>
+    <a href="{% url 'producto_detalle' producto.pk %}">{{ producto.sku }}</a> <span aria-hidden="true">›</span> <span aria-current="page">Archivar</span></nav>
+{% endblock %}
+{% block contenido %}
+  <div class="cabecera-pagina"><h1>Archivar producto</h1></div>
+  <form method="post" class="tarjeta form-angosto">
+    {% csrf_token %}
+    <input type="hidden" name="token" value="{{ token }}">
+    <p>¿Archivar <strong>{{ producto.nombre }}</strong> (código <span class="mono">{{ producto.sku }}</span>)?</p>
+    <ul>
+      <li>Desaparece de la lista, las búsquedas, el panel y la impresión.</li>
+      <li>Conserva su kardex ({{ n_movimientos }} movimiento{{ n_movimientos|pluralize }}); <strong>no se borra nada</strong>.</li>
+      <li>No admite movimientos nuevos mientras esté archivado.</li>
+      <li>Se puede reactivar cuando quieras desde su ficha.</li>
+    </ul>
+    {% if stock != 0 %}<p class="aviso-filtro">Ojo: todavía tiene stock ({{ stock|cantidad }}).</p>{% endif %}
+    <div class="acciones">
+      <button type="submit" class="peligro grande">Sí, archivar</button>
+      <a class="boton secundario grande" href="{% url 'producto_editar' producto.pk %}">Cancelar</a>
+    </div>
+  </form>
+{% endblock %}

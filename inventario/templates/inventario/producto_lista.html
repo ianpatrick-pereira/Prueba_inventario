@@ -3,7 +3,7 @@
 {% block titulo %}Productos - Sistema de inventario{% endblock %}
 {% block contenido %}
   <div class="cabecera-pagina">
-    <h1>{% if bajo_minimo %}Productos bajo mínimo{% else %}Productos{% endif %}</h1>
+    <h1>{% if archivados %}Productos archivados{% elif revision %}Productos que requieren revisión{% elif bajo_minimo %}Productos bajo mínimo{% else %}Productos{% endif %}</h1>
     <div class="barra">
       {% if not bajo_minimo %}<a class="boton secundario no-imprimir" href="?bajo_minimo=1{% if categoria_param != '' %}&amp;categoria={{ categoria_param }}{% endif %}">Imprimir bajo mínimo</a>{% endif %}
       {% if perms.inventario.add_producto %}<a class="boton" href="{% url 'producto_nuevo' %}">+ Nuevo producto</a>{% endif %}
@@ -18,10 +18,15 @@
     <span class="pista">Presiona <kbd>/</kbd> o <kbd>Ctrl</kbd>+<kbd>K</kbd> para buscar</span>
     {% if categoria_param != "" %}<input type="hidden" name="categoria" value="{{ categoria_param }}">{% endif %}
     {% if bajo_minimo %}<input type="hidden" name="bajo_minimo" value="1">{% endif %}
+    {% if revision %}<input type="hidden" name="revision" value="1">{% endif %}
+    {% if archivados %}<input type="hidden" name="archivados" value="1">{% endif %}
     {% if q %}<a class="boton secundario" href="{% if bajo_minimo %}?bajo_minimo=1{% else %}{% url 'producto_lista' %}{% endif %}">Limpiar</a>{% endif %}
   </form>
   <nav class="chips" aria-label="Filtrar por categoría">
     {% for c in chips %}<a class="chip" href="{{ c.href }}"{% if c.activo %} aria-current="true"{% endif %}>{{ c.texto }}</a>{% endfor %}
+  </nav>
+  <nav class="chips chips-estado" aria-label="Filtrar por estado">
+    {% for c in chips_estado %}<a class="chip{% if c.revision %} chip-revision{% endif %}" href="{{ c.href }}"{% if c.activo %} aria-current="true"{% endif %}>{{ c.texto }}</a>{% endfor %}
   </nav>
   {% if aviso_categoria %}<ul class="mensajes" role="status"><li class="warning">{{ aviso_categoria }}</li></ul>{% endif %}
   {% if bajo_minimo %}
@@ -39,9 +44,9 @@
     <thead><tr><th>Código</th><th>Nombre</th><th class="no-imprimir">Categoría</th><th class="num stock">Stock</th><th class="num">Mínimo</th><th class="num solo-impresion">Máximo</th><th class="num solo-impresion">Sugerido</th><th class="num no-imprimir">Precio venta</th></tr></thead>
     <tbody>
     {% for p in productos %}
-      <tr{% if p.stock_min > 0 and p.stock <= p.stock_min %} class="bajo"{% endif %}>
+      <tr{% if p.stock_min > 0 and p.stock <= p.stock_min %}{% if p.requiere_revision %} class="bajo revision"{% else %} class="bajo"{% endif %}{% elif p.requiere_revision %} class="revision"{% endif %}>
         <td class="mono"><a href="{% url 'producto_detalle' p.pk %}{% if volver_param %}?{{ volver_param }}{% endif %}">{{ p.sku }}</a></td>
-        <td>{{ p.nombre }}</td>
+        <td>{{ p.nombre }}{% if p.requiere_revision %} <span class="insignia insignia-urgente" title="{{ p.motivo_revision }}">⚠ Requiere modificación urgente</span>{% endif %}{% if archivados %} <span class="insignia insignia-archivado">Archivado</span>{% endif %}</td>
         <td class="no-imprimir">{{ p.categoria.nombre|default:"-" }}</td>
         <td class="num stock"><span class="stock-celda">{% barra_stock p.stock p.stock_min p.stock_max %}<span class="stock-valor">{{ p.stock|cantidad }}</span>{% if p.stock_min > 0 and p.stock <= p.stock_min %}<span class="insignia insignia-bajo">bajo mínimo</span>{% endif %}</span></td>
         <td class="num">{{ p.stock_min|cantidad }}</td>
@@ -62,7 +67,7 @@
   {% endif %}
   {% else %}
     <div class="vacio">
-      <p>{% if q %}No se encontraron productos para «{{ q }}».{% elif bajo_minimo %}No hay productos bajo el mínimo.{% elif categoria_sel != "" %}No hay productos en esta categoría.{% else %}Aún no hay productos.{% endif %}</p>
+      <p>{% if q %}No se encontraron productos para «{{ q }}».{% elif archivados %}No hay productos archivados.{% elif revision %}No hay productos que requieran revisión.{% elif bajo_minimo %}No hay productos bajo el mínimo.{% elif categoria_sel != "" %}No hay productos en esta categoría.{% else %}Aún no hay productos.{% endif %}</p>
       {% if perms.inventario.add_producto and not q and not bajo_minimo and categoria_sel == "" %}<a class="boton" href="{% url 'producto_nuevo' %}">+ Agregar el primer producto</a>{% endif %}
     </div>
   {% endif %}
