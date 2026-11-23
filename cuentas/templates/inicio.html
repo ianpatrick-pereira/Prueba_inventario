@@ -15,7 +15,7 @@
     <a class="tarjeta indicador {% if bajo_minimo %}alerta{% else %}ok{% endif %}" href="{% url 'producto_lista' %}?bajo_minimo=1">
       <span class="etiqueta-cifra">Productos bajo mínimo</span>
       <span class="cifra{% if bajo_minimo %} alerta{% endif %}">{{ bajo_minimo }}</span>
-      <span class="detalle">{% if bajo_minimo %}Ver la lista y reponer{% else %}Todo sobre el mínimo{% endif %}</span>
+      <span class="detalle">{% if bajo_minimo %}Ver la lista y reponer{% else %}Ningún producto con stock de aviso{% endif %}</span>
     </a>
     {% endif %}
     {% if perms.inventario.view_producto %}
