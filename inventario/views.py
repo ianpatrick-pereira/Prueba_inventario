@@ -18,7 +18,7 @@ from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
 from . import servicios, tokens
-from .calculos import calcular_margen
+from .calculos import calcular_margen, q_bajo_minimo
 from .forms import (
     CategoriaForm,
     CodigoAlternativoForm,
@@ -101,7 +101,7 @@ class ProductoLista(Permiso, ListView):
         elif cat is not None:
             qs = qs.filter(categoria_id=cat)
         if self._bajo_minimo():                 # mismo criterio de la marca «bajo minimo» de la lista
-            qs = qs.filter(stock_min__gt=0, stock__lte=F("stock_min"))
+            qs = qs.filter(q_bajo_minimo())
         if not q:
             return qs.order_by("nombre", "pk")
         # Subconsultas (no joins): un producto nunca sale repetido ni altera su stock.

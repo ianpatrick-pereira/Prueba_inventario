@@ -151,20 +151,22 @@ def test_stock_con_dos_decimales_y_marca_bajo_el_minimo(adm, admin_user, prod):
     otro = Producto.objects.create(sku="OK1", nombre="Con stock", stock_min=D("2"), stock_max=D("9"))
     sin_minimo = Producto.objects.create(sku="SM", nombre="Sin minimo")
     servicios.registrar_entrada(prod, "2.5", admin_user)     # 2.50 > 2: sobre el minimo
-    servicios.registrar_entrada(otro, "1.25", admin_user)    # 1.25 <= 2: bajo el minimo
+    servicios.registrar_entrada(otro, "0.75", admin_user)    # D-66: 0.75 <= 2/2 (la mitad del minimo): bajo el minimo
     r = adm.get(reverse("producto_lista"))
     filas = {p.sku: p for p in r.context["productos"]}
-    assert filas["C934J"].stock == D("2.50") and filas["OK1"].stock == D("1.25")
+    assert filas["C934J"].stock == D("2.50") and filas["OK1"].stock == D("0.75")
     texto = html(r)
-    assert "2,50" in texto and "1,25" in texto and '<span class="stock-valor">0</span>' in texto   # enteros sin decimales, fracciones con 2
+    assert "2,50" in texto and "0,75" in texto and '<span class="stock-valor">0</span>' in texto   # enteros sin decimales, fracciones con 2
     marcadas = [l for l in texto.splitlines() if 'class="bajo"' in l]
     assert len(marcadas) == 1 and "bajo mínimo" in texto
     assert "OK1" in texto.split('class="bajo"')[1][:300]
     assert sin_minimo.stock_min == 0  # sin minimo definido no se marca
 
 
-def test_en_el_minimo_exacto_se_marca(adm, admin_user, prod):
-    servicios.registrar_entrada(prod, 2, admin_user)
+def test_en_el_minimo_exacto_no_se_marca_y_bajo_el_minimo_si(adm, admin_user, prod):
+    servicios.registrar_entrada(prod, 2, admin_user)                 # D-66: exactamente el minimo NO es bajo minimo
+    assert 'class="bajo"' not in html(adm.get(reverse("producto_lista")))
+    servicios.registrar_salida(prod, 1, admin_user)
     assert 'class="bajo"' in html(adm.get(reverse("producto_lista")))
 
 

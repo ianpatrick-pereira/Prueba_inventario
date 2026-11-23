@@ -38,12 +38,13 @@
   <div class="rejilla dos">
     <div class="tarjeta">
       <div class="etiqueta-cifra">Stock actual</div>
-      <div class="cifra{% if producto.stock_min > 0 and stock <= producto.stock_min %} alerta{% endif %}">{{ stock|cl }} <span class="ayuda">{{ producto.unidad }}</span></div>
-      {% if producto.stock_min > 0 and stock <= producto.stock_min %}<p><span class="insignia insignia-bajo">(en o bajo el mínimo)</span></p>{% endif %}
+      <div class="cifra{% bajo_minimo stock producto.stock_min as bajo %}{% if bajo %} alerta{% endif %}">{{ stock|cl }} <span class="ayuda">{{ producto.unidad }}</span></div>
+      {% if bajo %}<p><span class="insignia insignia-bajo">(bajo el mínimo)</span></p>{% endif %}
       <div class="barra-grande">{% barra_stock stock producto.stock_min producto.stock_max %}</div>
       {% if perms.inventario.view_movimiento %}<p><a class="boton grande" href="{% url 'kardex' producto.pk %}{% if volver_param %}?{{ volver_param }}{% endif %}">Ver kardex</a></p>{% endif %}
       <dl class="datos">
         <div class="dato"><dt>Stock mínimo</dt><dd>{{ producto.stock_min|cl }}</dd></div>
+        {% if producto.stock_min|aviso_bajo %}<div class="dato"><dt>Aviso de bajo stock</dt><dd>{{ producto.stock_min|aviso_bajo }}</dd></div>{% endif %}
         <div class="dato"><dt>Stock máximo</dt><dd>{{ producto.stock_max|cl }}</dd></div>
       </dl>
     </div>

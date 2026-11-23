@@ -31,7 +31,7 @@
   {% if aviso_categoria %}<ul class="mensajes" role="status"><li class="warning">{{ aviso_categoria }}</li></ul>{% endif %}
   {% if bajo_minimo %}
   <div class="aviso-filtro">
-    <span>Solo productos en o bajo el mínimo. Cantidad sugerida = máximo − stock.</span>
+    <span>Solo productos bajo el mínimo (stock en la mitad del mínimo o menos; con mínimo 1, solo con 0). Cantidad sugerida = máximo − stock (si el mínimo es mayor que el máximo, mínimo − stock).</span>
     <span class="acciones">
       <button type="button" class="solo-js" data-imprimir>Imprimir esta lista</button>
       <a class="boton secundario" href="{% url 'producto_lista' %}{% if categoria_param != '' %}?categoria={{ categoria_param }}{% endif %}">Quitar filtro</a>
@@ -44,11 +44,12 @@
     <thead><tr><th>Código</th><th>Nombre</th><th class="no-imprimir">Categoría</th><th class="num stock">Stock</th><th class="num">Mínimo</th><th class="num solo-impresion">Máximo</th><th class="num solo-impresion">Sugerido</th><th class="num no-imprimir">Precio venta</th></tr></thead>
     <tbody>
     {% for p in productos %}
-      <tr{% if p.stock_min > 0 and p.stock <= p.stock_min %}{% if p.requiere_revision %} class="bajo revision"{% else %} class="bajo"{% endif %}{% elif p.requiere_revision %} class="revision"{% endif %}>
+      {% bajo_minimo p.stock p.stock_min as bajo %}
+      <tr{% if bajo %}{% if p.requiere_revision %} class="bajo revision"{% else %} class="bajo"{% endif %}{% elif p.requiere_revision %} class="revision"{% endif %}>
         <td class="mono"><a href="{% url 'producto_detalle' p.pk %}{% if volver_param %}?{{ volver_param }}{% endif %}">{{ p.sku }}</a></td>
         <td>{{ p.nombre }}{% if p.requiere_revision %} <span class="insignia insignia-urgente" title="{{ p.motivo_revision }}">⚠ Requiere modificación urgente</span>{% endif %}{% if archivados %} <span class="insignia insignia-archivado">Archivado</span>{% endif %}</td>
         <td class="no-imprimir">{{ p.categoria.nombre|default:"-" }}</td>
-        <td class="num stock"><span class="stock-celda">{% barra_stock p.stock p.stock_min p.stock_max %}<span class="stock-valor">{{ p.stock|cantidad }}</span>{% if p.stock_min > 0 and p.stock <= p.stock_min %}<span class="insignia insignia-bajo">bajo mínimo</span>{% endif %}</span></td>
+        <td class="num stock"><span class="stock-celda">{% barra_stock p.stock p.stock_min p.stock_max %}<span class="stock-valor">{{ p.stock|cantidad }}</span>{% if bajo %}<span class="insignia insignia-bajo">bajo mínimo</span>{% endif %}</span></td>
         <td class="num">{{ p.stock_min|cantidad }}</td>
         <td class="num solo-impresion">{{ p.stock_max|cantidad }}</td>
         <td class="num solo-impresion">{{ p|sugerida }}</td>

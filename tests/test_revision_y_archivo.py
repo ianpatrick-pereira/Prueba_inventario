@@ -202,7 +202,7 @@ def test_panel_cuenta_solo_los_activos(adm, con_revision):
 # ================================================================== D-64: archivar
 @pytest.fixture
 def producto_con_kardex(admin_user):
-    p = Producto.objects.create(sku="K1", nombre="Con historial", stock_min=D("5"), stock_max=D("20"))
+    p = Producto.objects.create(sku="K1", nombre="Con historial", stock_min=D("6"), stock_max=D("20"))
     servicios.registrar_entrada(p, D("3"), admin_user)
     return p
 

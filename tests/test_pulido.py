@@ -182,10 +182,10 @@ def test_el_panel_no_escribe_nada(adm, admin_user):
 
 
 # ------------------------------------------------------------------ barra de stock
-@pytest.mark.parametrize("stock,minimo,maximo,color", [
-    (3, 6, 15, "rojo"), (6, 6, 15, "rojo"), (0, 0, 10, "rojo"),
-    (7, 6, 15, "ambar"), (7.5, 6, 15, "ambar"), (8, 6, 15, "verde"), (15, 6, 15, "verde"), (20, 6, 15, "verde"),
-    (4, 1, 10, "ambar"), (6, 1, 10, "verde"),
+@pytest.mark.parametrize("stock,minimo,maximo,color", [          # D-66 (final)
+    (3, 6, 15, "rojo"), (2.5, 5, 15, "rojo"), (4, 6, 15, "ambar"), (3, 5, 15, "ambar"), (6, 6, 15, "ambar"),
+    (7, 6, 15, "verde"), (15, 6, 15, "verde"), (20, 6, 15, "verde"), (0, 0, 10, "verde"),
+    (0, 1, 10, "rojo"), (1, 1, 10, "ambar"), (4, 1, 10, "verde"),
 ])
 def test_color_de_la_barra_de_stock(stock, minimo, maximo, color):
     assert calcular_barra_stock(stock, minimo, maximo)["color"] == color
@@ -193,9 +193,9 @@ def test_color_de_la_barra_de_stock(stock, minimo, maximo, color):
 
 def test_barra_posiciones_y_limites():
     b = calcular_barra_stock(3, 6, 15)
-    assert b["pct"] == 20.0 and b["marca"] == 40.0
+    assert b["pct"] == 20.0 and b["marca"] == 20.0          # D-66: la marca es el umbral de aviso (mitad del minimo)
     assert calcular_barra_stock(30, 6, 15)["pct"] == 100.0 and calcular_barra_stock(-5, 6, 15)["pct"] == 0.0
-    assert calcular_barra_stock(5, 20, 15)["marca"] == 100.0
+    assert calcular_barra_stock(5, 40, 15)["marca"] == 100.0
 
 
 @pytest.mark.parametrize("maximo", [0, -1, None])
@@ -208,12 +208,12 @@ def test_barra_en_la_lista_con_texto_accesible(adm, admin_user):
     b = prod("AM", stock_min=D("6"), stock_max=D("15"))
     c = prod("VD", stock_min=D("6"), stock_max=D("15"))
     sm = prod("SM", stock_min=D("0"), stock_max=D("0"))
-    for p, n in ((a, 3), (b, 7), (c, 12), (sm, 1)):
+    for p, n in ((a, 3), (b, 5), (c, 12), (sm, 1)):
         servicios.registrar_entrada(p, n, admin_user)
     t = html(adm.get(reverse("producto_lista")))
     assert t.count('class="barra-stock rojo"') == 1 and t.count('class="barra-stock ambar"') == 1
     assert t.count('class="barra-stock verde"') == 1
-    assert 'aria-label="3 de 15, mínimo 6"' in t and 'title="3 de 15, mínimo 6"' in t and 'role="img"' in t
+    assert 'aria-label="3 de 15, aviso con 3 o menos"' in t and 'title="3 de 15, aviso con 3 o menos"' in t and 'role="img"' in t
     fila_sm = next(f for f in t.split("<tr") if ">SM<" in f)
     assert "barra-stock" not in fila_sm                       # maximo 0: sin barra
 
@@ -222,7 +222,7 @@ def test_barra_en_la_ficha(adm, admin_user):
     p = prod("F", stock_min=D("6"), stock_max=D("15"))
     servicios.registrar_entrada(p, 9, admin_user)
     t = html(adm.get(reverse("producto_detalle", args=[p.pk])))
-    assert 'class="barra-stock verde"' in t and 'aria-label="9 de 15, mínimo 6"' in t
+    assert 'class="barra-stock verde"' in t and 'aria-label="9 de 15, aviso con 3 o menos"' in t
     q = prod("G")
     assert "barra-stock" not in html(adm.get(reverse("producto_detalle", args=[q.pk])))
 
@@ -267,9 +267,9 @@ def skus(r):
 def test_filtro_bajo_minimo_solo_y_con_categoria(adm, surtido):
     c1, c2 = surtido
     url = reverse("producto_lista")
-    assert skus(adm.get(url, {"bajo_minimo": "1"})) == ["A1", "F1", "F2"]          # 4 <= 4 cuenta; sin minimo (S1) no
+    assert skus(adm.get(url, {"bajo_minimo": "1"})) == ["A1", "F1"]          # D-66: 4 de minimo 4 (F2) ya no cuenta; sin minimo (S1) tampoco
     assert skus(adm.get(url, {"bajo_minimo": "1", "categoria": c1.pk})) == ["A1"]
-    assert skus(adm.get(url, {"bajo_minimo": "1", "categoria": c2.pk})) == ["F1", "F2"]
+    assert skus(adm.get(url, {"bajo_minimo": "1", "categoria": c2.pk})) == ["F1"]
     assert skus(adm.get(url, {"bajo_minimo": "1", "categoria": "ninguna"})) == []
     assert skus(adm.get(url, {"bajo_minimo": "1", "q": "F1"})) == ["F1"]
     assert len(adm.get(url).context["productos"]) == 5                            # sin el filtro, todos
@@ -282,8 +282,9 @@ def test_lista_bajo_minimo_titulo_aviso_y_columnas_de_impresion(adm, surtido):
     assert "data-imprimir" in t and 'class="solo-js"' in t
     fila = next(f for f in t.split("<tr") if ">A1<" in f)
     assert 'class="num solo-impresion">15</td>' in fila and 'class="num solo-impresion">13</td>' in fila   # max 15, sugerido 15-2
-    fila_f2 = next(f for f in t.split("<tr") if ">F2<" in f)
-    assert 'class="num solo-impresion">6</td>' in fila_f2                                                  # 10-4
+    fila_f1 = next(f for f in t.split("<tr") if ">F1<" in f)
+    assert 'class="num solo-impresion">9</td>' in fila_f1                                                  # 10-1
+    assert ">F2<" not in t                                                                                 # 4 de minimo 4: no es bajo
     assert "Impreso el" in t
 
 
@@ -558,7 +559,7 @@ def test_la_celda_de_stock_tiene_barra_numero_e_insignia_en_ese_orden_en_un_cont
     c = _celda_stock(t, "BJ")
     assert c.startswith('<span class="stock-celda">') and c.endswith("</span>")
     assert c.index('class="barra-stock rojo"') < c.index('<span class="stock-valor">3</span>') < c.index("insignia insignia-bajo")
-    assert 'aria-label="3 de 15, mínimo 6"' in c and 'title="3 de 15, mínimo 6"' in c and 'role="img"' in c
+    assert 'aria-label="3 de 15, aviso con 3 o menos"' in c and 'title="3 de 15, aviso con 3 o menos"' in c and 'role="img"' in c
     c = _celda_stock(t, "OK")                                    # sobre el minimo: barra y numero, sin insignia
     assert c.index('class="barra-stock verde"') < c.index('<span class="stock-valor">9</span>') and "insignia" not in c
     c = _celda_stock(t, "SB")                                    # sin maximo: solo numero (sigue en su columna)

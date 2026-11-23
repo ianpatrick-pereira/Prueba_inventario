@@ -15,8 +15,8 @@
 
   <div class="tarjeta">
     <div class="etiqueta-cifra">Stock actual</div>
-    <div class="cifra{% if producto.stock_min > 0 and stock <= producto.stock_min %} alerta{% endif %}">{{ stock|cl }} <span class="ayuda">{{ producto.unidad }}</span></div>
-    {% if producto.stock_min > 0 and stock <= producto.stock_min %}<p><span class="insignia insignia-bajo">bajo mínimo</span> <span class="ayuda">(mínimo {{ producto.stock_min|cl }})</span></p>{% endif %}
+    <div class="cifra{% bajo_minimo stock producto.stock_min as bajo %}{% if bajo %} alerta{% endif %}">{{ stock|cl }} <span class="ayuda">{{ producto.unidad }}</span></div>
+    {% if bajo %}<p><span class="insignia insignia-bajo">bajo mínimo</span> <span class="ayuda">(mínimo {{ producto.stock_min|cl }})</span></p>{% endif %}
     {% if not producto.activo %}<p><span class="insignia insignia-archivado">Producto archivado</span> <span class="ayuda">No admite movimientos nuevos. <a href="{% url 'producto_detalle' producto.pk %}">Reactivarlo desde su ficha</a>.</span></p>{% endif %}
     <div class="acciones">
       {% if producto.activo %}{% if perms.inventario.registrar_entrada %}<a class="boton grande" href="{% url 'entrada' producto.pk %}">Registrar entrada</a>{% endif %}

@@ -75,16 +75,49 @@ def barra_stock(stock, minimo, maximo):
         return {"dibujar": False}
     datos.update({
         "dibujar": True,
-        "texto": f"{formatear_cantidad(stock)} de {formatear_cantidad(maximo)}, mínimo {formatear_cantidad(minimo)}",
+        "texto": f"{formatear_cantidad(stock)} de {formatear_cantidad(maximo)}"
+                 + (f", aviso {aviso_bajo(minimo)}" if aviso_bajo(minimo) else ""),
     })
     return datos
 
 
+@register.filter(name="aviso_bajo")
+def aviso_bajo(minimo):
+    """Texto del umbral de aviso (D-66): «con 3 o menos» (minimo 6), «con 0» (minimo 1). Vacio sin minimo."""
+    from ..calculos import UNO, umbral_aviso
+
+    try:
+        umbral = umbral_aviso(minimo)
+    except (InvalidOperation, ValueError):
+        return ""
+    if umbral is None:
+        return ""
+    if Decimal(str(minimo)) <= UNO:
+        return "con 0" if Decimal(str(minimo)) == UNO else f"con menos de {formatear_cantidad(minimo)}"
+    if Decimal(str(minimo)) == Decimal(str(minimo)).to_integral_value():     # minimo entero: unidades enteras
+        umbral = umbral.to_integral_value(rounding="ROUND_FLOOR")
+    return f"con {formatear_cantidad(umbral)} o menos"
+
+
 @register.filter(name="sugerida")
 def sugerida(producto):
-    """Cantidad sugerida a reponer = maximo - stock, solo si es mayor que cero (hoja impresa)."""
+    """Cantidad sugerida a reponer (hoja impresa, D-66): el mayor entre maximo y minimo, menos el stock.
+    Vacia si no hay nada que reponer."""
+    from ..calculos import cantidad_sugerida
+
     try:
-        diferencia = Decimal(str(producto.stock_max)) - Decimal(str(producto.stock))
+        cantidad = cantidad_sugerida(producto.stock, producto.stock_min, producto.stock_max)
     except (InvalidOperation, AttributeError, ValueError):
         return ""
-    return formatear_cantidad(diferencia) if diferencia > 0 else ""
+    return formatear_cantidad(cantidad) if cantidad > 0 else ""
+
+
+@register.simple_tag(name="bajo_minimo")
+def bajo_minimo(stock, minimo):
+    """{% bajo_minimo stock minimo as bajo %}: la regla unica D-66 (stock < minimo, con minimo > 0)."""
+    from ..calculos import es_bajo_minimo
+
+    try:
+        return es_bajo_minimo(stock, minimo)
+    except (InvalidOperation, ValueError):
+        return False

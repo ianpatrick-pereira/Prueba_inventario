@@ -6,6 +6,7 @@ from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, Sum
 from django.utils import timezone
 
 from . import servicios
+from .calculos import q_bajo_minimo
 from .models import Movimiento, Producto
 
 
@@ -23,7 +24,7 @@ def panel_del_dia(usuario):
         datos["hay_panel"] = True
         valor = ExpressionWrapper(F("stock") * F("costo"), output_field=DecimalField(max_digits=24, decimal_places=2))
         r = servicios.productos_con_stock(Producto.objects.filter(activo=True)).aggregate(
-            bajo_minimo=Count("pk", filter=Q(stock_min__gt=0, stock__lte=F("stock_min"))),
+            bajo_minimo=Count("pk", filter=q_bajo_minimo()),
             sin_costo=Count("pk", filter=Q(costo=0, stock__gt=0)),
             valor=Sum(valor),
         )
