@@ -94,6 +94,8 @@ def aviso_bajo(minimo):
         return ""
     if Decimal(str(minimo)) <= UNO:
         return "con 0" if Decimal(str(minimo)) == UNO else f"con menos de {formatear_cantidad(minimo)}"
+    if Decimal(str(minimo)) == Decimal(str(minimo)).to_integral_value():     # minimo entero: unidades enteras
+        umbral = umbral.to_integral_value(rounding="ROUND_FLOOR")
     return f"con {formatear_cantidad(umbral)} o menos"
 
 

@@ -81,7 +81,7 @@ def test_sugerida_en_la_hoja_impresa_con_maximo_igual_al_minimo(adm, admin_user)
 
 def test_textos_de_aviso_y_texto_accesible_de_la_barra(adm, admin_user):
     assert aviso_bajo(D("6")) == "con 3 o menos" and aviso_bajo(D("1")) == "con 0"
-    assert aviso_bajo(D("5")) == "con 2,50 o menos" and aviso_bajo(D("0")) == ""
+    assert aviso_bajo(D("5")) == "con 2 o menos" and aviso_bajo(D("7")) == "con 3 o menos" and aviso_bajo(D("0")) == ""
     assert barra_stock(D("3"), D("6"), D("6"))["texto"] == "3 de 6, aviso con 3 o menos"
     p = producto("T", 6, 10, 3, admin_user)
     ficha = adm.get(reverse("producto_detalle", args=[p.pk])).content.decode()
@@ -98,3 +98,16 @@ def test_la_marca_de_la_barra_indica_el_umbral_de_aviso():
 def test_minimo_cero_nunca_es_bajo_ni_tiene_aviso(adm, admin_user):
     p = producto("Z", 0, 0, 0, admin_user)
     assert not es_bajo_minimo(0, 0) and "Aviso de bajo stock" not in adm.get(reverse("producto_detalle", args=[p.pk])).content.decode()
+
+
+@pytest.mark.parametrize("minimo,texto", [(5, "con 2 o menos"), (6, "con 3 o menos"), (7, "con 3 o menos")])
+def test_aviso_en_unidades_enteras_cuando_el_minimo_es_entero(adm, admin_user, minimo, texto):
+    assert aviso_bajo(D(minimo)) == texto
+    assert barra_stock(D("1"), D(minimo), D("10"))["texto"] == f"1 de 10, aviso {texto}"
+    p = producto("E1", minimo, 10, 5, admin_user)
+    assert f"Aviso de bajo stock" in adm.get(reverse("producto_detalle", args=[p.pk])).content.decode()
+    assert texto in adm.get(reverse("producto_detalle", args=[p.pk])).content.decode()
+
+
+def test_con_minimo_decimal_se_mantiene_el_formato_actual():
+    assert aviso_bajo(D("5.5")) == "con 2,75 o menos"
